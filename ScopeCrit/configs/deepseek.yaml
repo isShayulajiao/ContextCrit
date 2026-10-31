@@ -14,3 +14,7 @@ runtime:
   concurrency: 1
   seed: 42
   fail_fast: false
+evaluation:
+  semantic_alignment: llm
+  enable_paid_judge: true
+  judges_config: judges.yaml

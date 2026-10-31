@@ -1,0 +1,37 @@
+# 四个模型分别对齐，再平均同一指标。不要在本文件填写真实 Key。
+# 用户示例的 Qwen/GLM model 参数与标题不一致，此处按明确要求的模型配置，绝不静默替换。
+enabled: true
+fixture: false
+max_api_retries: 2
+max_format_repairs: 1
+max_input_chars: 120000
+judges:
+  - name: deepseek-flash
+    provider: openai
+    model: deepseek-flash
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    reasoning_effort: high
+    thinking_enabled: true
+    response_format_json: true
+  - name: GLM-4.5-Air
+    provider: zai
+    model: glm-4.5-air
+    api_key_env: ZHIPU_API_KEY
+    temperature: 0.0
+  - name: qwen3.8-flash
+    provider: openai
+    model: qwen3.8-flash
+    # 例如 https://真实WorkspaceId.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+    # 必须按账号业务空间和地域设置，程序不会猜测 WorkspaceId。
+    base_url_env: DASHSCOPE_BASE_URL
+    api_key_env: DASHSCOPE_API_KEY
+    temperature: 0.0
+  - name: grok-build-0.1
+    provider: openai
+    model: grok-build-0.1
+    # 用户指定服务；/v1 是 OpenAI 兼容接口约定，实际可用路径需以该服务为准。
+    base_url: https://api.apikey.fan/v1
+    base_url_env: GROK_BASE_URL  # 本地设置提供时优先；未提供时使用上方默认地址。
+    api_key_env: GROK_API_KEY
+    temperature: 0.0

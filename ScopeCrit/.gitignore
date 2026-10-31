@@ -5,6 +5,11 @@ __pycache__/
 .venv/
 runs/
 .env
+.env.*
+settings.local.yaml
+settings.local.yml
+*.local.yaml
+*.local.yml
 configs/local*.yaml
 build/
 dist/

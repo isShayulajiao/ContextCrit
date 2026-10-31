@@ -1,0 +1,18 @@
+# 复制为 settings.local.yaml，在复制的文件中直接填入真实 Key。
+# settings.local.yaml 已被 Git 忽略；不要在本模板填写真实 Key 后提交。
+input: ../CritPred_test.json
+max_samples: null  # null / None 表示全部；521 表示前 521 条，命令行可覆盖
+run_dir: null      # 自动建立输出目录；如需固定路径可填写 runs/experiment_001
+judges_config: configs/judges.yaml
+api_keys:
+  deepseek: ""
+  glm: ""
+  qwen: ""
+  grok: ""
+# Qwen 固定华北 2（北京），模型 qwen3.8-flash。
+# WorkspaceId 不是 API Key；请从你的业务空间获取，程序不能从 Key 推断。
+qwen_workspace_id: ""
+# 一般无需填写；如填写完整 HTTPS 地址，则不要同时填写 workspace_id。
+qwen_base_url: ""
+# 用户提供的 Grok 服务，路径可按你的服务实际要求修改；不会切换模型。
+grok_base_url: https://api.apikey.fan/v1

@@ -1,31 +1,38 @@
 推荐 Python 3.11，最低 Python 3.11，兼容 Python 3.12。
-Python 版本属于 Conda 环境；DeepSeek Key 才是要设置的环境变量。
-先进入 CultCrit-Bench/ScopeCrit 目录，再执行：
+先进入 CultCrit-Bench/ScopeCrit 目录：
 
 conda create -n scopecrit python=3.11 -y
 conda activate scopecrit
 python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-python --version
+
+复制 settings.example.yaml 为 settings.local.yaml（Windows 可手动复制）。
+在 settings.local.yaml 中直接填写：
+1. input：数据集 JSON 文件路径
+2. api_keys：DeepSeek、GLM、Qwen、Grok 四个 Key
+3. qwen_workspace_id：你的华北 2（北京）业务空间 ID
+4. max_samples：null 表示全部，521 表示前 521 条
+
+不需要 export、不需要手动设置环境变量、不需要 pip install -e .。
+真实 Key 只填 settings.local.yaml，该文件不上传 GitHub。
+
+直接答题并自动四模型评分：
+python run.py
+
+覆盖处理条数：
+python run.py --max-samples 521
+python run.py --max-samples None
+
+已有答案只评分：
+python run.py --evaluate-only --run-dir runs/你的输出目录
+
+只答题不评分：
+python run.py --no-judge
+
+离线演示（无需 Key）：
+python run.py --input examples/merged_demo.json --config configs/mock.yaml --no-judge
 python -m pytest -q
 
-先运行离线演示（无密钥、无网络、不收费）：
-python run.py --input examples/merged_demo.json --config configs/mock.yaml
-
-真实推理（Linux/macOS）：
-export DEEPSEEK_API_KEY="你的 DeepSeek API Key"
-python run.py --input /你的数据路径/你的数据集.json
-
-只处理前 521 条：
-python run.py --input /你的数据路径/你的数据集.json --max-samples 521
-
-处理全部（默认）：
-python run.py --input /你的数据路径/你的数据集.json --max-samples None
-
-真实推理（Windows PowerShell）设置变量：
-$env:DEEPSEEK_API_KEY="你的 DeepSeek API Key"
-
-API 密钥是 DeepSeek 官方服务的必要认证；代码不保存密钥。
-安装好依赖后，仅填写数据路径和 Key 即可运行；默认配置和输出目录自动处理。
-不需要 pip install -e .；若想使用 scopecrit 命令简写，再执行 python -m pip install -e . --no-deps。
-输入为一个完整 JSON 数组，不训练模型，不需要划分数据，不安装 torch 或 GPU 依赖。
-目录已存在时用 resume 或新目录。详细指标、人工语义对齐与故障说明见 README.md。
+主要看 judge_summary.json、metrics_summary.csv、per_sample_metrics.csv、report.md。
+模型名固定为 deepseek-flash、glm-4.5-air、qwen3.8-flash、grok-build-0.1，不做静默替换。
+Qwen 的业务空间 ID 不能从 Key 推断；地域固定北京。
+真实服务及账户可用性需实际验证，SDK 测试为本地 HTTP 模拟。

@@ -336,7 +336,7 @@ def evaluate_predictions(predictions: list[dict], gold_rows: list[dict], alignme
         results.append(item)
     per_task = {task: _aggregate([r for r in results if r["task"] == task]) for task in ("T1", "T2", "T3", "T4")}
     return {"overall": _aggregate(results), "per_task": per_task, "per_sample": results,
-            "notes": ["语义指标依赖人工一对一对齐；未评分项为 null。", "Evidence F1 只检查证据集合，不证明语义支持。", "无 bootstrap 置信区间；应在研究分析阶段按 doc_id 分组重采样。"]}
+            "notes": ["语义指标依赖独立的一对一对齐（人工或模型）；来源见对应评测记录，未评分项为 null。", "Evidence F1 只检查证据集合，不证明语义支持。", "无 bootstrap 置信区间；应在研究分析阶段按 doc_id 分组重采样。"]}
 
 
 def _aggregate(items: list[dict]) -> dict:

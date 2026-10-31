@@ -96,7 +96,7 @@ def test_json_path_and_key_use_real_sdk_serialization_for_all_tasks(tmp_path, mo
     monkeypatch.setattr(openai, "OpenAI", local_openai)
     monkeypatch.setenv("DEEPSEEK_API_KEY", fake_key)
     monkeypatch.chdir(tmp_path)
-    assert cli.main(["run", "--input", str(source)]) == 0
+    assert cli.main(["run", "--input", str(source), "--no-judge"]) == 0
     assert len(captured) == len(expected) == 35
     databases = list(tmp_path.rglob("state.sqlite3"))
     assert len(databases) == 1

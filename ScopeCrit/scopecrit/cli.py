@@ -21,6 +21,7 @@ from .storage import Store
 
 UNSET = object()
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "deepseek.yaml"
+DEFAULT_JUDGES = DEFAULT_CONFIG.parent / "judges.yaml"
 
 
 def parse_max_samples(value):
@@ -81,7 +82,41 @@ def score(store, rows, run_dir, alignment_path=None):
     return metrics
 
 
-def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=False, max_samples=UNSET):
+def judge_configuration(config, override=None, force=False):
+    """独立评分配置，不把裁判密钥写入答题 manifest。"""
+    evaluation = config.get("evaluation", {})
+    if not (force or override or (evaluation.get("enable_paid_judge") and evaluation.get("semantic_alignment") == "llm")):
+        return None
+    from .judge_config import load_judges
+    result = load_judges(override or evaluation.get("judges_config") or DEFAULT_JUDGES)
+    if not result["enabled"]:
+        raise ValueError("裁判配置 enabled=false；请启用评分或显式使用 --no-judge")
+    return result
+
+
+def automatic_score(store, rows, run_dir, judge_config, structural, log=tqdm.write, retry_uncertain=False):
+    from .judging import run_judges
+    from .reporting import build_report, format_console, write_report
+    usable_rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("sample_id"), str)
+                   and r.get("task") in ("T1", "T2", "T3", "T4")]
+    ids = {row["sample_id"] for row in usable_rows}
+    predictions = [p for p in store.list_predictions() if p["sample_id"] in ids]
+    result = run_judges(predictions, usable_rows, run_dir, judge_config, log=log,
+                        retry_uncertain=retry_uncertain)
+    manifest = json.loads((Path(run_dir) / "manifest.json").read_text(encoding="utf-8"))
+    report = build_report(result["per_judge"], structural, Path(manifest["input_path"]).stem,
+                          [judge["name"] for judge in judge_config["judges"]])
+    report["judging_complete"] = result["complete"]
+    report["judge_request_stats"] = result.get("request_stats", {})
+    write_report(report, run_dir)
+    log(format_console(report))
+    log("[裁判汇总] 各裁判、各任务和逐样本指标：judge_summary.json / metrics_summary.csv / per_sample_metrics.csv / report.md")
+    log("[裁判汇总] 四裁判均完成才给出正式均值；缺失项为 null，另列可用结果及评分覆盖率")
+    return result["complete"]
+
+
+def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=False, max_samples=UNSET,
+        judges_config=None, no_judge=False, retry_uncertain_judges=False):
     config = load_config(config_path)
     if max_samples is not UNSET:
         if max_samples is not None and (type(max_samples) is not int or max_samples <= 0):
@@ -96,6 +131,14 @@ def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=Fal
         raise ValueError("运行目录已存在；请使用 resume 或指定新的 --run-dir")
     if config["provider"]["kind"] == "mock" and not config["fixture"]:
         raise ValueError("Mock 只验证人工 fixture 流程；请使用 fixture: true，真实数据请选择 DeepSeek")
+    judges = None if no_judge else judge_configuration(config, judges_config)
+    if judges is not None:
+        from .judge_config import preflight_credentials
+        missing = [item for item in preflight_credentials(judges) if item["status"] != "ready"]
+        if missing:
+            descriptions = [item["judge"] + ":" + ",".join(item.get("missing") or [item.get("error_code", "配置无效")]) for item in missing]
+            raise ValueError("裁判配置尚未填写完整：" + "; ".join(descriptions) +
+                             "。请填写 settings.local.yaml；仅需答题可使用 --no-judge，已有预测可单独 evaluate --auto-judge")
     # 在创建运行目录前发现缺少 API 密钥、脚本等配置错误。
     provider = make_provider(config)
     store = Store(run_dir)
@@ -132,10 +175,15 @@ def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=Fal
             if config["runtime"]["fail_fast"] and result["status"] != "COMPLETED":
                 break
         store.export()
-        score(store, rows, run_dir)
+        structural = score(store, rows, run_dir)
+        judging_complete = True
+        if judges is not None:
+            judging_complete = automatic_score(store, rows, run_dir, judges, structural,
+                                                retry_uncertain=retry_uncertain_judges)
         tqdm.write(f"[完成] 预测、轨迹、消息和分任务指标已写入 {run_dir}")
-        tqdm.write("[评分] 未提供人工语义对齐的指标为 null；查看 alignment_template.json")
-        return 0 if rows and all(state["status"] == "COMPLETED" for state in store.list_states()) else 1
+        if judges is None:
+            tqdm.write("[评分] 本次未使用语义裁判；结构指标见 metrics.json，可随后单独自动评分")
+        return 0 if rows and judging_complete and all(state["status"] == "COMPLETED" for state in store.list_states()) else 1
     finally:
         store.close()
 
@@ -154,15 +202,25 @@ def main(argv=None):
     execute.add_argument("--run-dir", help="省略时自动创建唯一的 runs/deepseek_* 输出目录")
     execute.add_argument("--max-samples", type=parse_max_samples, default=UNSET,
                          help="处理输入顺序的前 N 条；None 处理全部；省略时使用配置")
+    execute.add_argument("--judges-config", help="独立裁判配置，指定即启用自动评分")
+    execute.add_argument("--no-judge", action="store_true", help="本次只生成预测和程序结构指标，不调用裁判")
+    execute.add_argument("--retry-uncertain-judges", action="store_true", help="显式重试不确定裁判请求，可能重复计费")
     resume_parser = sub.add_parser("resume", help="从 SQLite 状态续跑")
     resume_parser.add_argument("--run-dir", required=True)
     resume_parser.add_argument("--retry-uncertain", action="store_true", help="显式接受不确定调用可能重复计费")
+    resume_parser.add_argument("--judges-config")
+    resume_parser.add_argument("--no-judge", action="store_true")
+    resume_parser.add_argument("--retry-uncertain-judges", action="store_true")
     for name in ("export", "inspect", "evaluate"):
         command = sub.add_parser(name)
         command.add_argument("--run-dir", required=True)
         if name == "evaluate":
             command.add_argument("--gold", required=True, help="同一个输入 JSON，不需要单独拆分 gold 文件")
             command.add_argument("--alignment", help="独立人工语义对齐 JSON")
+            command.add_argument("--auto-judge", action="store_true", help="用配置中的独立模型自动对齐与评分")
+            command.add_argument("--judges-config", help="指定即启用裁判，不依赖答题时的评分模式")
+            command.add_argument("--no-judge", action="store_true", help="只计算结构指标或人工对齐指标")
+            command.add_argument("--retry-uncertain-judges", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.command == "validate":
@@ -171,11 +229,17 @@ def main(argv=None):
             print(f'校验 {report["total"]} 条；无效 {len(report["invalid"])} 条；报告：{args.report}')
             return 0 if report["valid"] else 1
         if args.command == "run":
-            return run(args.input, args.config, args.run_dir, max_samples=args.max_samples)
+            if args.no_judge and args.judges_config:
+                raise ValueError("--no-judge 与 --judges-config 不能同时使用")
+            return run(args.input, args.config, args.run_dir, max_samples=args.max_samples,
+                       judges_config=args.judges_config, no_judge=args.no_judge,
+                       retry_uncertain_judges=args.retry_uncertain_judges)
         manifest = json.loads((Path(args.run_dir) / "manifest.json").read_text(encoding="utf-8"))
         if args.command == "resume":
             return run(manifest["input_path"], manifest["config_path"], args.run_dir, True, args.retry_uncertain,
-                       max_samples=manifest["config"]["runtime"]["max_samples"])
+                       max_samples=manifest["config"]["runtime"]["max_samples"],
+                       judges_config=args.judges_config, no_judge=args.no_judge,
+                       retry_uncertain_judges=args.retry_uncertain_judges)
         store = Store(args.run_dir)
         try:
             if args.command == "export":
@@ -189,6 +253,15 @@ def main(argv=None):
                 if fingerprint(Path(args.gold).read_text(encoding="utf-8")) != manifest["input_fingerprint"]:
                     raise ValueError("评分输入与原始运行输入不同；请使用同一个 JSON 文件")
                 metrics = score(store, rows, args.run_dir, args.alignment)
+                if args.alignment and (args.auto_judge or args.judges_config):
+                    raise ValueError("人工对齐与自动裁判应分开执行，不能同时指定")
+                if args.no_judge and (args.auto_judge or args.judges_config):
+                    raise ValueError("--no-judge 与自动裁判选项不能同时指定")
+                judges = None if args.no_judge or args.alignment else judge_configuration(
+                    manifest["config"], args.judges_config, args.auto_judge)
+                if judges is not None:
+                    return 0 if automatic_score(store, rows, args.run_dir, judges, metrics,
+                                                retry_uncertain=args.retry_uncertain_judges) else 1
                 print(json.dumps(metrics["per_task"], ensure_ascii=False, indent=2))
         finally:
             store.close()

@@ -65,8 +65,15 @@ class RetrievalConfig(StrictModel):
 
 
 class EvaluationConfig(StrictModel):
-    semantic_alignment: Literal["manual"] = "manual"
-    enable_paid_judge: Literal[False] = False
+    semantic_alignment: Literal["manual", "llm"] = "manual"
+    enable_paid_judge: bool = False
+    judges_config: str | None = None
+
+    @model_validator(mode="after")
+    def paid_judging_is_explicit(self):
+        if self.semantic_alignment == "llm" and not self.enable_paid_judge:
+            raise ValueError("模型自动对齐需要 enable_paid_judge: true")
+        return self
 
 
 class MockConfig(StrictModel):
@@ -96,4 +103,10 @@ def load_config(path: str | Path) -> dict:
         if not script.is_absolute():
             script = path.parent / script
         config["mock"]["script"] = str(script.resolve())
+    judges_path = config["evaluation"]["judges_config"]
+    if judges_path:
+        judge_file = Path(judges_path)
+        if not judge_file.is_absolute():
+            judge_file = path.parent / judge_file
+        config["evaluation"]["judges_config"] = str(judge_file.resolve())
     return config
