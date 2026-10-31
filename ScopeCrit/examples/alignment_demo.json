@@ -1,0 +1,112 @@
+[
+  {
+    "sample_id": "Demo:T1",
+    "turn": null,
+    "alignment_complete": true,
+    "matches": [
+      {
+        "predicted_claim_id": "P001",
+        "gold_claim_id": "C1",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      },
+      {
+        "predicted_claim_id": "P002",
+        "gold_claim_id": "C2",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      }
+    ]
+  },
+  {
+    "sample_id": "Demo:T2",
+    "turn": null,
+    "alignment_complete": true,
+    "matches": [
+      {
+        "predicted_claim_id": "P001",
+        "gold_claim_id": "C1",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      },
+      {
+        "predicted_claim_id": "P002",
+        "gold_claim_id": "C2",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      }
+    ],
+    "relation_quality": "correct"
+  },
+  {
+    "sample_id": "Demo:T3",
+    "turn": null,
+    "alignment_complete": true,
+    "matches": [
+      {
+        "predicted_claim_id": "P001",
+        "gold_claim_id": "C1",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      },
+      {
+        "predicted_claim_id": "P002",
+        "gold_claim_id": "C2",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      }
+    ]
+  },
+  {
+    "sample_id": "Demo:T3",
+    "turn": 1,
+    "alignment_complete": true,
+    "matches": [
+      {
+        "predicted_claim_id": "P001",
+        "gold_claim_id": "C1",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      }
+    ]
+  },
+  {
+    "sample_id": "Demo:T3",
+    "turn": 2,
+    "alignment_complete": true,
+    "matches": [
+      {
+        "predicted_claim_id": "P001",
+        "gold_claim_id": "C1",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      },
+      {
+        "predicted_claim_id": "P002",
+        "gold_claim_id": "C2",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      }
+    ]
+  },
+  {
+    "sample_id": "Demo:T4",
+    "turn": null,
+    "alignment_complete": true,
+    "matches": [
+      {
+        "predicted_claim_id": "I:P001",
+        "gold_claim_id": "C1",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      },
+      {
+        "predicted_claim_id": "I:P002",
+        "gold_claim_id": "C2",
+        "relation": "equivalent",
+        "note": "人工合成测试：对象、范围与命题相符，标签另行计分。"
+      }
+    ],
+    "dual_dependency": true
+  }
+]

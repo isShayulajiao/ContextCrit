@@ -1,0 +1,292 @@
+[
+  {
+    "sample_id": "Demo:T1",
+    "doc_id": "Demo",
+    "task": "T1",
+    "question": "评论者如何评价小说结构？请区分整体与结尾。",
+    "document": {
+      "doc_id": "Demo",
+      "work_title": "《示例小说》",
+      "text": "评论者认为《示例小说》整体结构严谨。但他批评结尾收束仓促，缺少铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《示例小说》整体结构严谨。",
+          "start": 0,
+          "end": 18
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但他批评结尾收束仓促，缺少铺垫。",
+          "start": 18,
+          "end": 34
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说整体结构的严谨性。",
+          "aspect": "STRUCTURE",
+          "target_scope": "整体结构",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾仓促且铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体结构严谨[E001]，同时批评结尾仓促、铺垫不足[E002]；整体与局部的不同评价可以共存。"
+    },
+    "events": [],
+    "roles": {},
+    "required_exchanges": [],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "DERIVED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  },
+  {
+    "sample_id": "Demo:T2",
+    "doc_id": "Demo",
+    "task": "T2",
+    "question": "整体结构严谨与结尾仓促是否矛盾？请联系两段证据解释。",
+    "document": {
+      "doc_id": "Demo",
+      "work_title": "《示例小说》",
+      "text": "评论者认为《示例小说》整体结构严谨。但他批评结尾收束仓促，缺少铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《示例小说》整体结构严谨。",
+          "start": 0,
+          "end": 18
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但他批评结尾收束仓促，缺少铺垫。",
+          "start": 18,
+          "end": 34
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说整体结构的严谨性。",
+          "aspect": "STRUCTURE",
+          "target_scope": "整体结构",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾仓促且铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体结构严谨[E001]，同时批评结尾仓促、铺垫不足[E002]；整体与局部的不同评价可以共存。"
+    },
+    "events": [],
+    "roles": {},
+    "required_exchanges": [],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "DERIVED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  },
+  {
+    "sample_id": "Demo:T3",
+    "doc_id": "Demo",
+    "task": "T3",
+    "question": "随材料逐轮公开，维护全部有依据的评价。",
+    "document": {
+      "doc_id": "Demo",
+      "work_title": "《示例小说》",
+      "text": "评论者认为《示例小说》整体结构严谨。但他批评结尾收束仓促，缺少铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《示例小说》整体结构严谨。",
+          "start": 0,
+          "end": 18
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但他批评结尾收束仓促，缺少铺垫。",
+          "start": 18,
+          "end": 34
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说整体结构的严谨性。",
+          "aspect": "STRUCTURE",
+          "target_scope": "整体结构",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾仓促且铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体结构严谨[E001]，同时批评结尾仓促、铺垫不足[E002]；整体与局部的不同评价可以共存。"
+    },
+    "events": [
+      {
+        "turn": 1,
+        "question": "目前能确定什么评价？",
+        "visible_evidence_ids": [
+          "E001"
+        ],
+        "expected_operation": "ADD",
+        "gold_memory_state": [
+          "C1"
+        ],
+        "reference_answer": "评论者肯定整体结构严谨[E001]。"
+      },
+      {
+        "turn": 2,
+        "question": "加入新证据后，保留旧判断并增加局部评价。",
+        "visible_evidence_ids": [
+          "E002"
+        ],
+        "expected_operation": "EXPAND",
+        "gold_memory_state": [
+          "C1",
+          "C2"
+        ],
+        "reference_answer": "保留整体结构严谨的评价[E001]，新增结尾仓促、铺垫不足的批评[E002]。"
+      }
+    ],
+    "roles": {},
+    "required_exchanges": [],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "CONTROLLED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  },
+  {
+    "sample_id": "Demo:T4",
+    "doc_id": "Demo",
+    "task": "T4",
+    "question": "双方交换必要证据，联合解释整体结构与结尾的评价。",
+    "document": {
+      "doc_id": "Demo",
+      "work_title": "《示例小说》",
+      "text": "评论者认为《示例小说》整体结构严谨。但他批评结尾收束仓促，缺少铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《示例小说》整体结构严谨。",
+          "start": 0,
+          "end": 18
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但他批评结尾收束仓促，缺少铺垫。",
+          "start": 18,
+          "end": 34
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说整体结构的严谨性。",
+          "aspect": "STRUCTURE",
+          "target_scope": "整体结构",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾仓促且铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体结构严谨[E001]，同时批评结尾仓促、铺垫不足[E002]；整体与局部的不同评价可以共存。"
+    },
+    "events": [],
+    "roles": {
+      "archivist": [
+        "E001"
+      ],
+      "interpreter": [
+        "E002"
+      ]
+    },
+    "required_exchanges": [
+      {
+        "from_agent": "archivist",
+        "to_agent": "interpreter",
+        "evidence_id": "E001",
+        "reason": "让回答者知道整体评价，避免把局部批评扩大为全部。"
+      },
+      {
+        "from_agent": "interpreter",
+        "to_agent": "archivist",
+        "evidence_id": "E002",
+        "reason": "共享结尾批评，使双方了解评价范围差异。"
+      }
+    ],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "CONTROLLED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  }
+]

@@ -1,0 +1,16 @@
+# 真正调用官方服务前，只需设置 DEEPSEEK_API_KEY 一个环境变量。
+provider:
+  kind: deepseek
+  model: deepseek-flash
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
+  timeout_seconds: 180.0
+  reasoning_effort: high
+  thinking_enabled: true
+  response_format_json: true
+  max_output_tokens: 4096
+runtime:
+  max_samples: null  # None：全部；改成 521：仅处理原始顺序前 521 条
+  concurrency: 1
+  seed: 42
+  fail_fast: false

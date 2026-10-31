@@ -1,0 +1,31 @@
+推荐 Python 3.11，最低 Python 3.11，兼容 Python 3.12。
+Python 版本属于 Conda 环境；DeepSeek Key 才是要设置的环境变量。
+先进入 CultCrit-Bench/ScopeCrit 目录，再执行：
+
+conda create -n scopecrit python=3.11 -y
+conda activate scopecrit
+python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+python --version
+python -m pytest -q
+
+先运行离线演示（无密钥、无网络、不收费）：
+python run.py --input examples/merged_demo.json --config configs/mock.yaml
+
+真实推理（Linux/macOS）：
+export DEEPSEEK_API_KEY="你的 DeepSeek API Key"
+python run.py --input /你的数据路径/你的数据集.json
+
+只处理前 521 条：
+python run.py --input /你的数据路径/你的数据集.json --max-samples 521
+
+处理全部（默认）：
+python run.py --input /你的数据路径/你的数据集.json --max-samples None
+
+真实推理（Windows PowerShell）设置变量：
+$env:DEEPSEEK_API_KEY="你的 DeepSeek API Key"
+
+API 密钥是 DeepSeek 官方服务的必要认证；代码不保存密钥。
+安装好依赖后，仅填写数据路径和 Key 即可运行；默认配置和输出目录自动处理。
+不需要 pip install -e .；若想使用 scopecrit 命令简写，再执行 python -m pip install -e . --no-deps。
+输入为一个完整 JSON 数组，不训练模型，不需要划分数据，不安装 torch 或 GPU 依赖。
+目录已存在时用 resume 或新目录。详细指标、人工语义对齐与故障说明见 README.md。

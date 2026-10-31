@@ -1,0 +1,6 @@
+# Python >= 3.11；不需要 torch、CUDA 或本地模型权重。
+openai>=1.66,<3
+pydantic>=2.10,<3
+PyYAML>=6.0.2,<7
+tqdm>=4.67,<5
+pytest>=8.3,<10

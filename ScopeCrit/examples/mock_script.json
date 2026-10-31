@@ -1,0 +1,544 @@
+{
+  "Demo:T1": [
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "PLAN_GAPS",
+        "arguments": {
+          "gaps": [
+            {
+              "gap_id": null,
+              "kind": "SCOPE",
+              "question": "整体与结尾分别受到什么评价？",
+              "related_claim_ids": [],
+              "status": "OPEN",
+              "resolution_claim_ids": []
+            }
+          ]
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "SEARCH",
+        "arguments": {
+          "query": "结构结尾",
+          "top_k": 2
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "PROPOSE",
+        "arguments": {
+          "claims": [
+            {
+              "text": "评论者认为作品整体结构严谨。",
+              "aspect": "STRUCTURE",
+              "target_scope": "整体结构",
+              "stance": "POSITIVE",
+              "evidence_ids": [
+                "E001"
+              ]
+            },
+            {
+              "text": "评论者认为结尾收束仓促且铺垫不足。",
+              "aspect": "STRUCTURE",
+              "target_scope": "结尾",
+              "stance": "NEGATIVE",
+              "evidence_ids": [
+                "E002"
+              ]
+            }
+          ]
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "P001"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "P001",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E001"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "P002"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "P002",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E002"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "FINALIZE",
+        "arguments": {
+          "claim_ids": [
+            "P001",
+            "P002"
+          ],
+          "relation_ids": [],
+          "answer": "整体结构严谨[E001]，但结尾仓促、铺垫不足[E002]；两者针对不同范围，可以共存。"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    }
+  ],
+  "Demo:T2": [
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "PLAN_GAPS",
+        "arguments": {
+          "gaps": [
+            {
+              "gap_id": null,
+              "kind": "SCOPE",
+              "question": "整体与结尾分别受到什么评价？",
+              "related_claim_ids": [],
+              "status": "OPEN",
+              "resolution_claim_ids": []
+            }
+          ]
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "PROPOSE",
+        "arguments": {
+          "claims": [
+            {
+              "text": "评论者认为作品整体结构严谨。",
+              "aspect": "STRUCTURE",
+              "target_scope": "整体结构",
+              "stance": "POSITIVE",
+              "evidence_ids": [
+                "E001"
+              ]
+            },
+            {
+              "text": "评论者认为结尾收束仓促且铺垫不足。",
+              "aspect": "STRUCTURE",
+              "target_scope": "结尾",
+              "stance": "NEGATIVE",
+              "evidence_ids": [
+                "E002"
+              ]
+            }
+          ]
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "P001"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "P001",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E001"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "P002"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "P002",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E002"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMPARE",
+        "arguments": {
+          "claim_ids": [
+            "P001",
+            "P002"
+          ],
+          "evidence_ids": [
+            "E001",
+            "E002"
+          ],
+          "question": "整体肯定与局部批评能否同时成立？"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    },
+    {
+      "stage": "SCOPE_COMPARE",
+      "response": {
+        "claim_ids": [
+          "P001",
+          "P002"
+        ],
+        "evidence_ids": [
+          "E001",
+          "E002"
+        ],
+        "relation_type": "COEXISTS",
+        "explanation": "整体结构和结尾属于不同范围，正面与负面评价可同时成立。"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "FINALIZE",
+        "arguments": {
+          "claim_ids": [
+            "P001",
+            "P002"
+          ],
+          "relation_ids": [
+            "R001"
+          ],
+          "answer": "整体结构严谨[E001]，但结尾仓促、铺垫不足[E002]；两者针对不同范围，可以共存。"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    }
+  ],
+  "Demo:T3": [
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "PROPOSE",
+        "arguments": {
+          "claims": [
+            {
+              "text": "评论者认为作品整体结构严谨。",
+              "aspect": "STRUCTURE",
+              "target_scope": "整体结构",
+              "stance": "POSITIVE",
+              "evidence_ids": [
+                "E001"
+              ]
+            }
+          ]
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "current_turn": 1
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "P001"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "current_turn": 1
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "P001",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E001"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "FINALIZE",
+        "arguments": {
+          "claim_ids": [
+            "P001"
+          ],
+          "relation_ids": [],
+          "answer": "评论者肯定整体结构严谨[E001]。"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "current_turn": 1
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "PROPOSE",
+        "arguments": {
+          "claims": [
+            {
+              "text": "评论者认为结尾收束仓促且铺垫不足。",
+              "aspect": "STRUCTURE",
+              "target_scope": "结尾",
+              "stance": "NEGATIVE",
+              "evidence_ids": [
+                "E002"
+              ]
+            }
+          ]
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "current_turn": 2
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "P002"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "current_turn": 2
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "P002",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E002"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "FINALIZE",
+        "arguments": {
+          "claim_ids": [
+            "P001",
+            "P002"
+          ],
+          "relation_ids": [],
+          "answer": "整体结构严谨[E001]，但结尾仓促、铺垫不足[E002]；两者针对不同范围，可以共存。"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "current_turn": 2
+    }
+  ],
+  "Demo:T4": [
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "SEND_EVIDENCE",
+        "arguments": {
+          "evidence_ids": [
+            "E001"
+          ],
+          "purpose": "共享整体评价，帮助区分范围",
+          "request_id": null
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "role": "archivist"
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "YIELD",
+        "arguments": {},
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "role": "archivist"
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "SEND_EVIDENCE",
+        "arguments": {
+          "evidence_ids": [
+            "E002"
+          ],
+          "purpose": "共享结尾评价，补充局部限制",
+          "request_id": null
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "role": "interpreter"
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "PROPOSE",
+        "arguments": {
+          "claims": [
+            {
+              "text": "评论者认为作品整体结构严谨。",
+              "aspect": "STRUCTURE",
+              "target_scope": "整体结构",
+              "stance": "POSITIVE",
+              "evidence_ids": [
+                "E001"
+              ]
+            },
+            {
+              "text": "评论者认为结尾收束仓促且铺垫不足。",
+              "aspect": "STRUCTURE",
+              "target_scope": "结尾",
+              "stance": "NEGATIVE",
+              "evidence_ids": [
+                "E002"
+              ]
+            }
+          ]
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "role": "interpreter"
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "I:P001"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "role": "interpreter"
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "I:P001",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E001"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "COMMIT",
+        "arguments": {
+          "candidate_id": "I:P002"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "role": "interpreter"
+    },
+    {
+      "stage": "SUPPORT_CHECK",
+      "response": {
+        "candidate_id": "I:P002",
+        "support": "SUPPORTED",
+        "scope_consistent": true,
+        "voice_preserved": true,
+        "modality_preserved": true,
+        "evidence_ids": [
+          "E002"
+        ],
+        "reason": "人工测试证据直接支持该范围内的评价"
+      }
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "YIELD",
+        "arguments": {},
+        "reason": "依据当前可见材料执行此操作"
+      },
+      "role": "archivist"
+    },
+    {
+      "stage": "ACTION",
+      "response": {
+        "action": "FINALIZE",
+        "arguments": {
+          "claim_ids": [
+            "I:P001",
+            "I:P002"
+          ],
+          "relation_ids": [],
+          "answer": "整体结构严谨[E001]，但结尾仓促、铺垫不足[E002]；两者针对不同范围，可以共存。"
+        },
+        "reason": "依据当前可见材料执行此操作"
+      }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+# 离线、无密钥、无网络的人工 fixture；不衡量真实模型能力。
+fixture: true
+provider:
+  kind: mock
+mock:
+  script: ../examples/mock_script.json
