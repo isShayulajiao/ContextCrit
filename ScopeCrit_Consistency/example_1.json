@@ -1,0 +1,124 @@
+[
+  {
+    "sample_id": "SyntheticDemo:T1",
+    "doc_id": "SyntheticDemo",
+    "task": "T1",
+    "question": "评论者如何评价小说的叙述与结尾？请区分评价范围。",
+    "document": {
+      "doc_id": "SyntheticDemo",
+      "work_title": "《虚构河岸》",
+      "text": "评论者认为《虚构河岸》的叙述节奏总体从容。但评论者批评结尾转折突然，缺少必要铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《虚构河岸》的叙述节奏总体从容。",
+          "start": 0,
+          "end": 21
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但评论者批评结尾转折突然，缺少必要铺垫。",
+          "start": 21,
+          "end": 41
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说叙述节奏总体从容。",
+          "aspect": "NARRATION",
+          "target_scope": "整体叙述节奏",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾转折突然、铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾转折",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体叙述节奏从容[E001]，同时批评结尾转折突然、铺垫不足[E002]；两项评价针对不同范围，可以并存。"
+    },
+    "events": [],
+    "roles": {},
+    "required_exchanges": [],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "DERIVED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  },
+  {
+    "sample_id": "SyntheticDemo:T2",
+    "doc_id": "SyntheticDemo",
+    "task": "T2",
+    "question": "整体叙述从容与结尾转折突然是否矛盾？请联系两条证据解释。",
+    "document": {
+      "doc_id": "SyntheticDemo",
+      "work_title": "《虚构河岸》",
+      "text": "评论者认为《虚构河岸》的叙述节奏总体从容。但评论者批评结尾转折突然，缺少必要铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《虚构河岸》的叙述节奏总体从容。",
+          "start": 0,
+          "end": 21
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但评论者批评结尾转折突然，缺少必要铺垫。",
+          "start": 21,
+          "end": 41
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说叙述节奏总体从容。",
+          "aspect": "NARRATION",
+          "target_scope": "整体叙述节奏",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾转折突然、铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾转折",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体叙述节奏从容[E001]，同时批评结尾转折突然、铺垫不足[E002]；两项评价针对不同范围，可以并存。"
+    },
+    "events": [],
+    "roles": {},
+    "required_exchanges": [],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "DERIVED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  }
+]

@@ -1,0 +1,170 @@
+[
+  {
+    "sample_id": "SyntheticDemo:T3",
+    "doc_id": "SyntheticDemo",
+    "task": "T3",
+    "question": "逐轮接收材料，维护截至当前全部有依据的评价，并保留评价范围。",
+    "document": {
+      "doc_id": "SyntheticDemo",
+      "work_title": "《虚构河岸》",
+      "text": "评论者认为《虚构河岸》的叙述节奏总体从容。但评论者批评结尾转折突然，缺少必要铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《虚构河岸》的叙述节奏总体从容。",
+          "start": 0,
+          "end": 21
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但评论者批评结尾转折突然，缺少必要铺垫。",
+          "start": 21,
+          "end": 41
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说叙述节奏总体从容。",
+          "aspect": "NARRATION",
+          "target_scope": "整体叙述节奏",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾转折突然、铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾转折",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体叙述节奏从容[E001]，同时批评结尾转折突然、铺垫不足[E002]；两项评价针对不同范围，可以并存。"
+    },
+    "events": [
+      {
+        "turn": 1,
+        "question": "目前公开的材料支持什么评价？",
+        "visible_evidence_ids": [
+          "E001"
+        ],
+        "expected_operation": "ADD",
+        "gold_memory_state": [
+          "C1"
+        ],
+        "reference_answer": "评论者肯定整体叙述节奏从容[E001]。"
+      },
+      {
+        "turn": 2,
+        "question": "加入新证据后，应保留哪些旧判断并增加什么评价？",
+        "visible_evidence_ids": [
+          "E002"
+        ],
+        "expected_operation": "EXPAND",
+        "gold_memory_state": [
+          "C1",
+          "C2"
+        ],
+        "reference_answer": "评论者肯定整体叙述节奏从容[E001]，同时批评结尾转折突然、铺垫不足[E002]；两项评价针对不同范围，可以并存。"
+      }
+    ],
+    "roles": {},
+    "required_exchanges": [],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "CONTROLLED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  },
+  {
+    "sample_id": "SyntheticDemo:T4",
+    "doc_id": "SyntheticDemo",
+    "task": "T4",
+    "question": "双方分别持有部分材料，请交换必要证据，联合解释整体叙述与结尾的评价。",
+    "document": {
+      "doc_id": "SyntheticDemo",
+      "work_title": "《虚构河岸》",
+      "text": "评论者认为《虚构河岸》的叙述节奏总体从容。但评论者批评结尾转折突然，缺少必要铺垫。",
+      "evidence": [
+        {
+          "evidence_id": "E001",
+          "text": "评论者认为《虚构河岸》的叙述节奏总体从容。",
+          "start": 0,
+          "end": 21
+        },
+        {
+          "evidence_id": "E002",
+          "text": "但评论者批评结尾转折突然，缺少必要铺垫。",
+          "start": 21,
+          "end": 41
+        }
+      ]
+    },
+    "gold": {
+      "claims": [
+        {
+          "claim_id": "C1",
+          "text": "评论者肯定小说叙述节奏总体从容。",
+          "aspect": "NARRATION",
+          "target_scope": "整体叙述节奏",
+          "stance": "POSITIVE",
+          "evidence_ids": [
+            "E001"
+          ]
+        },
+        {
+          "claim_id": "C2",
+          "text": "评论者批评结尾转折突然、铺垫不足。",
+          "aspect": "STRUCTURE",
+          "target_scope": "结尾转折",
+          "stance": "NEGATIVE",
+          "evidence_ids": [
+            "E002"
+          ]
+        }
+      ],
+      "required_evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "reference_answer": "评论者肯定整体叙述节奏从容[E001]，同时批评结尾转折突然、铺垫不足[E002]；两项评价针对不同范围，可以并存。"
+    },
+    "events": [],
+    "roles": {
+      "archivist": [
+        "E001"
+      ],
+      "interpreter": [
+        "E002"
+      ]
+    },
+    "required_exchanges": [
+      {
+        "from_agent": "archivist",
+        "to_agent": "interpreter",
+        "evidence_id": "E001",
+        "reason": "提供整体叙述节奏的肯定，避免将结尾批评扩大为全书评价。"
+      },
+      {
+        "from_agent": "interpreter",
+        "to_agent": "archivist",
+        "evidence_id": "E002",
+        "reason": "补充针对结尾的局部批评，使双方说明不同范围的评价并存。"
+      }
+    ],
+    "material_origin": "SYNTHETIC",
+    "task_origin": "CONTROLLED",
+    "human_verified": false,
+    "generation_method": "HAND_WRITTEN_TEST_FIXTURE"
+  }
+]

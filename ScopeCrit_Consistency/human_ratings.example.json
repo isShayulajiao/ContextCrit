@@ -1,0 +1,15 @@
+[
+  {
+    "sample_id": "替换成真实doc_id:T1",
+    "scores": {
+      "Accuracy": 4,
+      "Naturalness": 4,
+      "Informativeness": 4,
+      "Contextual Fidelity": 4,
+      "Evidence Grounding": 4
+    },
+    "pass_fail_review": "PASS",
+    "evidence_error_ids": [],
+    "short_rationale": "填写人工实际复核理由；此文件只是格式示例。"
+  }
+]

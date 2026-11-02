@@ -1,0 +1,52 @@
+{
+  "input_files": [
+    ""
+  ],
+  "output_dir": "consistency_results",
+  "limit": 100,
+  "qwen_workspace_id": "",
+  "timeout_seconds": 180,
+  "max_attempts": 3,
+  "retry_delay_seconds": 2,
+  "judges": [
+    {
+      "name": "Qwen",
+      "model": "qwen3.8-flash",
+      "api_key": "",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "base_url": "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "temperature": 0,
+      "max_tokens": 4096,
+      "json_mode": true,
+      "extra_body": {
+        "enable_thinking": false
+      }
+    },
+    {
+      "name": "GLM",
+      "model": "glm-4.5-air",
+      "api_key": "",
+      "api_key_env": "ZAI_API_KEY",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "temperature": 0,
+      "max_tokens": 4096,
+      "json_mode": true,
+      "extra_body": {
+        "thinking": {
+          "type": "disabled"
+        }
+      }
+    },
+    {
+      "name": "Grok",
+      "model": "grok-build-0.1",
+      "api_key": "",
+      "api_key_env": "GROK_API_KEY",
+      "base_url": "https://api.apikey.fan/v1",
+      "temperature": 0,
+      "max_tokens": 4096,
+      "json_mode": false,
+      "extra_body": {}
+    }
+  ]
+}
