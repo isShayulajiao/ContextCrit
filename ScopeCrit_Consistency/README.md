@@ -1,4 +1,4 @@
-# T1–T4 五维 κ / α 一致性检验（v3，支持单个或多个JSON）
+# T1–T4 五维 κ / α 一致性检验（v4，支持多线程和单个或多个JSON）
 
 本工具对 GPT 构造、DeepSeek 优化后的数据集做三模型独立质量复评。输入为**一个或多个 UTF-8 JSON 数组文件**，支持既有 T1–T4 协议。三位裁判分别为 `qwen3.8-flash`、`glm-4.5-air`、`grok-build-0.1`，每条完整任务样本独立调用三次 API，互不可见其他裁判的评分。不会运行 ScopeCrit Agent，不改写输入或重新划分 train/test。
 
@@ -46,6 +46,30 @@ Qwen 北京地址会自动替换 `{WorkspaceId}`，模型固定为 `qwen3.8-flas
 
 Grok 根据提供的域名，默认采用 `https://api.apikey.fan/v1/chat/completions`。该第三方网关的模型权限及兼容参数未做真实账号验证；若网关文档要求不同路径，修改 `base_url`（不含 `/chat/completions`）。不会自动替换为其他模型。Qwen/GLM 默认启用 JSON 模式并关闭思考；Grok 默认只以提示词要求 JSON，避免假定网关支持 `response_format`。参数和模型返回的实际 `model` 均保留记录。
 
+## 多线程运行（v4）
+
+默认仍为串行`workers=1`，旧配置无需增加字段即可运行。启用多线程：
+
+```bash
+python consistency_check.py --workers 6 --workers-per-model 2 --limit 100
+```
+
+`workers`是全局同时执行的API请求上限，**不是同时处理的文章数**；`workers-per-model`是每个裁判的同时请求上限，`0`表示只受全局上限限制。上例最多同时6个请求，每个模型最多2个。三个模型可同时审核同一条样本，也可同时处理不同样本；`limit=100`仍是本次最多选择100条待评样本，重试另计。
+
+也可在`config.json`顶层设置`"workers": 6, "workers_per_model": 2`，命令行参数优先。建议先用3个总并发、每模型1个验证配额，再提高到6/2；若频繁429，降低并发。多线程不保证速度按线程数成倍增长，实际受接口延迟和RPM/TPM配额影响。
+
+结果校验与SQLite写入都由主线程完成，线程池仅执行HTTP。成功结果即时提交，导出文件按原始样本和裁判顺序整理；并发日志的完成顺序可能不同。429/5xx/格式失败仍受`max_attempts`约束，重试等待期间可继续处理其他请求。
+
+遇到认证/模型配置等致命错误，停止派发新请求，取消尚未开始的请求，等待已经发出的请求返回并保存；已经发出的请求可能产生费用。Ctrl+C采用同样的停止派发与保存策略，可能需要等当前网络请求结束。强制结束进程遗留的调用在恢复时标为`uncertain`；明确使用`--retry-errors`补评。线程资源不足时同样保存已有响应，并记录无法确定结果的派发。
+
+线程数和每模型上限不进入评分指纹，改变这两个参数不会使已保存的评分失效，也无需重评；模型、数据和Rubric的变更规则仍然适用。`summary.json`的`execution_batches`保留每批的线程设置、开始/结束时间及状态；`calls.jsonl`记录实际派发和返回顺序。冻结manifest中的`order`表示样本选择与候选队列顺序，实际并发顺序以调用记录为准。`cancelled`表示派发尚未开始就被取消。
+
+**从v3升级只需替换`consistency_check.py`，保留已填写的配置和结果目录。** 例如补评旧错误：
+
+```bash
+python consistency_check.py --workers 6 --workers-per-model 2 --retry-errors --limit 100
+```
+
 ## 2. 你要看的结果
 
 默认输出到 `consistency_results/`：
@@ -58,7 +82,7 @@ Grok 根据提供的域名，默认采用 `https://api.apikey.fan/v1/chat/comple
 | ratings.csv / ratings.json | 逐样本、逐模型评分及状态；CSV可直接用Excel打开 |
 | review_queue.json | 待复核样本、完整原样本与触发理由，不自动修改或淘汰数据 |
 | checkpoint.sqlite3 | 断点与每次真实请求记录；请保留 |
-| calls.jsonl | 每次请求的时间、耗时、最终回复、返回模型、用量和错误；未知用量为null |
+| calls.jsonl | 请求派发、时间、耗时、最终回复、返回模型、用量和错误；未知用量为null |
 | run_manifest.json / rubric.txt | 冻结Rubric、模型、温度、输入指纹、调用顺序等可追溯资料 |
 | input_validation.json | 不调用模型即可判断的结构错误 |
 

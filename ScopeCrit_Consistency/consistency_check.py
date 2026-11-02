@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, deque
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from itertools import combinations
 import csv
 import hashlib
+import heapq
 import json
 import math
 import os
@@ -129,6 +131,10 @@ def load_config(path):
         require(type(value) in (int, float) and math.isfinite(value) and (value > 0 if key == "timeout_seconds" else value >= 0), f"{key} 无效")
     cfg.setdefault("max_attempts", 3)
     require(type(cfg["max_attempts"]) is int and cfg["max_attempts"] > 0, "max_attempts 必须为正整数")
+    cfg.setdefault("workers", 1)
+    cfg.setdefault("workers_per_model", 0)
+    require(type(cfg["workers"]) is int and cfg["workers"] >= 1, "workers 必须为正整数")
+    require(type(cfg["workers_per_model"]) is int and cfg["workers_per_model"] >= 0, "workers_per_model 必须为非负整数；0表示不额外限制")
     judges = cfg.get("judges")
     require(isinstance(judges, list) and len(judges) == 3, "必须配置恰好三个独立裁判")
     names = []
@@ -299,6 +305,9 @@ def open_store(path, manifest):
     db.executescript("""CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS results (sample_id TEXT, judge TEXT, status TEXT NOT NULL, review TEXT, error TEXT, updated_at TEXT, PRIMARY KEY(sample_id,judge));
     CREATE TABLE IF NOT EXISTS calls (id INTEGER PRIMARY KEY, sample_id TEXT, judge TEXT, status TEXT, started_at TEXT, ended_at TEXT, elapsed_seconds REAL, request_hash TEXT, metadata TEXT, content TEXT, error TEXT);""")
+    db.execute("""CREATE TABLE IF NOT EXISTS execution_batches (
+        id INTEGER PRIMARY KEY, started_at TEXT, ended_at TEXT, workers INTEGER,
+        workers_per_model INTEGER, requested_limit INTEGER, selected_samples INTEGER, status TEXT)""")
     old = db.execute("SELECT value FROM metadata WHERE key='manifest'").fetchone()
     if old:
         saved = strict_json(old[0])
@@ -309,23 +318,44 @@ def open_store(path, manifest):
         db.execute("INSERT INTO metadata VALUES ('manifest',?)", (encode(manifest),))
     db.execute("UPDATE results SET status='uncertain', error='上次调用中断，服务端可能已计费；使用 --retry-errors 重试' WHERE status='running'")
     db.execute("UPDATE calls SET status='uncertain', error='进程中断；未收到或未保存响应' WHERE status='running'")
+    db.execute("UPDATE execution_batches SET status='uncertain' WHERE status='running'")
     db.commit()
     return db
 
 
-def rate_sample(db, sample, judge, api_key, cfg, secrets):
+def build_payload(sample, judge):
     payload = {"model": judge["model"], "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": encode(project_sample(sample))}], "temperature": judge["temperature"], "max_tokens": judge["max_tokens"], "stream": False}
     if judge["json_mode"]:
         payload["response_format"] = {"type": "json_object"}
     payload.update(judge["extra_body"])
+    return payload
+
+
+def begin_rating(db, sample, judge, payload):
+    started, tick = now(), time.monotonic()
+    cursor = db.execute("INSERT INTO calls(sample_id,judge,status,started_at,request_hash) VALUES(?,?,'running',?,?)", (sample["sample_id"], judge["name"], started, fingerprint(payload)))
+    db.execute("INSERT OR REPLACE INTO results VALUES (?,?,'running',NULL,NULL,?)", (sample["sample_id"], judge["name"], started))
+    db.commit()
+    return cursor.lastrowid, tick
+
+
+def save_rating(db, sample, judge, call_id, tick, content, meta, review, last_error, secrets):
+    """All SQLite writes and response validation happen on the main thread."""
+    status = "ok" if review else "error"
+    safe_content = scrub(content, secrets) if isinstance(content, str) else None
+    safe_meta = scrub(meta, secrets) if meta else None
+    db.execute("UPDATE calls SET status=?,ended_at=?,elapsed_seconds=?,metadata=?,content=?,error=? WHERE id=?", (status, now(), round(time.monotonic()-tick, 3), encode(safe_meta) if safe_meta else None, safe_content, last_error if not review else None, call_id))
+    safe_review = encode(scrub(review, secrets)) if review else None
+    db.execute("INSERT OR REPLACE INTO results VALUES (?,?,?,?,?,?)", (sample["sample_id"], judge["name"], status, safe_review, last_error if not review else None, now()))
+    db.commit()
+
+
+def rate_sample(db, sample, judge, api_key, cfg, secrets):
+    payload = build_payload(sample, judge)
     evidence_ids = [e["evidence_id"] for e in sample["document"]["evidence"]]
     last_error = None
     for attempt in range(cfg["max_attempts"]):
-        started, tick = now(), time.monotonic()
-        cursor = db.execute("INSERT INTO calls(sample_id,judge,status,started_at,request_hash) VALUES(?,?,'running',?,?)", (sample["sample_id"], judge["name"], started, fingerprint(payload)))
-        call_id = cursor.lastrowid
-        db.execute("INSERT OR REPLACE INTO results VALUES (?,?,'running',NULL,NULL,?)", (sample["sample_id"], judge["name"], started))
-        db.commit()
+        call_id, tick = begin_rating(db, sample, judge, payload)
         content, meta, review = None, None, None
         fatal = False
         try:
@@ -340,15 +370,7 @@ def rate_sample(db, sample, judge, api_key, cfg, secrets):
             db.execute("UPDATE calls SET status='uncertain',ended_at=?,error=? WHERE id=?", (now(), "手动中断；请求可能已计费", call_id))
             db.commit()
             raise
-        status = "ok" if review else "error"
-        # Preserve full final answer text and usage; never persist reasoning_content.
-        safe_content = scrub(content, secrets) if isinstance(content, str) else None
-        safe_meta = scrub(meta, secrets) if meta else None
-        db.execute("UPDATE calls SET status=?,ended_at=?,elapsed_seconds=?,metadata=?,content=?,error=? WHERE id=?", (status, now(), round(time.monotonic()-tick, 3), encode(safe_meta) if safe_meta else None, safe_content, last_error if not review else None, call_id))
-        # Review rationale can contain echoed input; redact any configured credentials as well.
-        safe_review = encode(scrub(review, secrets)) if review else None
-        db.execute("INSERT OR REPLACE INTO results VALUES (?,?,?,?,?,?)", (sample["sample_id"], judge["name"], status, safe_review, last_error if not review else None, now()))
-        db.commit()
+        save_rating(db, sample, judge, call_id, tick, content, meta, review, last_error, secrets)
         if review:
             return
         if fatal:
@@ -358,6 +380,139 @@ def rate_sample(db, sample, judge, api_key, cfg, secrets):
             print(f"  {judge['name']} 请求/格式失败，{delay:g}秒后重试 ({attempt+2}/{cfg['max_attempts']})：{last_error[:240]}", flush=True)
             time.sleep(delay)
     print(f"  {judge['name']} 本条失败，已保存；可用 --retry-errors 补评", flush=True)
+
+
+def rate_parallel(db, todo, judges, needed, keys, cfg, workers, per_model):
+    """Bounded HTTP concurrency; the owning/main thread alone accesses SQLite.
+
+    Retries are queued with a due time rather than sleeping in a worker.
+    Fatal errors and Ctrl+C stop dispatch; in-flight responses are drained and
+    persisted before returning. A hard-killed call remains recoverable as uncertain.
+    """
+    pending = deque((sample, judge, 1) for sample in todo for judge in judges if needed(sample, judge))
+    total = len(pending)
+    active, retry_heap = {}, []
+    model_active = Counter()
+    finished = sequence = 0
+    stopped = interrupted = False
+    fatal_error = None
+    secrets = list(keys.values())
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scopecrit-http")
+
+    def allowed(job):
+        return not per_model or model_active[job[1]["name"]] < per_model
+
+    def next_job():
+        # Scan due retries and new jobs to avoid a busy model blocking the others.
+        blocked = []
+        chosen = None
+        while retry_heap and retry_heap[0][0] <= time.monotonic():
+            entry = heapq.heappop(retry_heap)
+            if allowed(entry[2]):
+                chosen = entry[2]
+                break
+            blocked.append(entry)
+        for entry in blocked:
+            heapq.heappush(retry_heap, entry)
+        if chosen is not None:
+            return chosen
+        for _ in range(len(pending)):
+            job = pending.popleft()
+            if allowed(job):
+                return job
+            pending.append(job)
+        return None
+
+    try:
+        while active or (not stopped and (pending or retry_heap)):
+            try:
+                # Finish every response currently available before dispatching more.
+                done = {future for future in active if future.done()}
+                if not done:
+                    while not stopped and len(active) < workers:
+                        if any(future.done() for future in active):
+                            break
+                        job = next_job()
+                        if job is None:
+                            break
+                        sample, judge, attempt = job
+                        payload = build_payload(sample, judge)
+                        call_id, tick = begin_rating(db, sample, judge, payload)
+                        try:
+                            future = pool.submit(post_completion, judge, keys[judge["name"]], payload, cfg["timeout_seconds"])
+                        except Exception as exc:
+                            # A broken executor may have enqueued a request before raising.
+                            # Do not claim that it was definitely never sent or charged.
+                            message = redact(f"线程任务派发失败，请降低workers后重试：{type(exc).__name__}: {exc}", secrets)
+                            db.execute("UPDATE calls SET status='uncertain',ended_at=?,error=? WHERE id=?", (now(), message, call_id))
+                            db.execute("UPDATE results SET status='uncertain',error=?,updated_at=? WHERE sample_id=? AND judge=?", (message, now(), sample["sample_id"], judge["name"]))
+                            db.commit()
+                            stopped = True
+                            fatal_error = APIError(message, fatal=True)
+                            print("并发任务派发失败：停止派发，等待已发请求返回并保存。", flush=True)
+                            break
+                        active[future] = (job, call_id, tick)
+                        model_active[judge["name"]] += 1
+                    if active:
+                        done, _ = wait(active, timeout=0.25, return_when=FIRST_COMPLETED)
+                        done |= {future for future in active if future.done()}
+                    elif not stopped and retry_heap:
+                        time.sleep(min(0.25, max(0, retry_heap[0][0]-time.monotonic())))
+                        continue
+                    else:
+                        continue
+                for future in sorted(done, key=lambda f: active[f][1]):
+                    job, call_id, tick = active[future]
+                    sample, judge, attempt = job
+                    content = meta = review = None
+                    last_error, fatal = None, False
+                    if future.cancelled():
+                        # The request never began; keep it eligible on a normal resume.
+                        db.execute("UPDATE calls SET status='cancelled',ended_at=?,error=? WHERE id=?", (now(), "派发已取消，未调用API", call_id))
+                        db.execute("DELETE FROM results WHERE sample_id=? AND judge=? AND status='running'", (sample["sample_id"], judge["name"]))
+                        db.commit()
+                    else:
+                        try:
+                            content, meta = future.result()
+                            require(meta["finish_reason"] == "stop", f"模型未正常结束(finish_reason={meta['finish_reason']})，不接收截断/拒答结果；可检查max_tokens")
+                            review = parse_review(content, [e["evidence_id"] for e in sample["document"]["evidence"]])
+                        except (APIError, ValueError) as exc:
+                            fatal = isinstance(exc, APIError) and exc.fatal
+                            last_error = redact(str(exc), secrets)
+                        except Exception as exc:
+                            fatal = True
+                            last_error = redact(f"{type(exc).__name__}: {exc}", secrets)
+                        save_rating(db, sample, judge, call_id, tick, content, meta, review, last_error, secrets)
+                        if fatal:
+                            if fatal_error is None:
+                                fatal_error = APIError(f"{judge['name']} 配置/认证/模型错误：{last_error}", fatal=True)
+                                print("检测到配置或接口错误：停止新派发，等待已发请求返回并保存。", flush=True)
+                            stopped = True
+                        if not review and not stopped and attempt < cfg["max_attempts"]:
+                            delay = min(cfg["retry_delay_seconds"] * (2 ** (attempt-1)), 30)
+                            sequence += 1
+                            heapq.heappush(retry_heap, (time.monotonic()+delay, sequence, (sample, judge, attempt+1)))
+                            print(f"  {sample['sample_id']} / {judge['name']}：失败，{delay:g}秒后补试 ({attempt+1}/{cfg['max_attempts']})", flush=True)
+                        else:
+                            finished += 1
+                            status = "已保存" if review else "失败，已记录"
+                            print(f"[评分 {finished}/{total}] {sample['sample_id']} / {judge['name']}：{status}", flush=True)
+                    del active[future]
+                    model_active[judge["name"]] -= 1
+                if stopped:
+                    for future in active:
+                        future.cancel()  # Only not-yet-started requests can be cancelled.
+            except KeyboardInterrupt:
+                stopped = interrupted = True
+                print("已停止新派发；等待已发请求返回或网络超时，并保存结果。", flush=True)
+                for future in active:
+                    future.cancel()
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    if interrupted:
+        raise KeyboardInterrupt
+    if fatal_error is not None:
+        raise fatal_error
 
 
 def read_human(path, samples):
@@ -414,7 +569,8 @@ def export_reports(db, samples, errors, cfg, directory, human, sources):
         records.append(record)
     valid_records = [r for r in records if not r["input_errors"]]
     stats = summarize(valid_records, judges, human_reviews=human)
-    stats["report_version"] = "3.0-flexible-inputs-five-dimensional-kappa"
+    stats["report_version"] = "4.0-bounded-concurrency-five-dimensional-kappa"
+    stats["execution_batches"] = [dict(row) for row in db.execute("SELECT * FROM execution_batches ORDER BY id")]
     source_files = [entry["path"] for entry in manifest["source_files"]]
     stats["by_file"] = {path: summarize([r for r in valid_records if r["source_file"] == path], judges, human_reviews=human) for path in source_files}
     # Always list T1–T4, including absent tasks (undefined statistics remain null).
@@ -485,6 +641,8 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, default=Path(__file__).with_name("config.json"))
     parser.add_argument("--input", type=Path, nargs="+", action="extend", metavar="JSON", help="一个或多个JSON文件；覆盖config.input_files，可重复使用--input")
     parser.add_argument("--limit", type=int, help="本次最多处理的待评样本数；每条由三裁判评估；0=全部")
+    parser.add_argument("--workers", type=int, help="总API请求并发上限；默认取config.workers，未设置则1")
+    parser.add_argument("--workers-per-model", type=int, help="每个裁判的并发上限；0表示仅受总并发上限限制")
     parser.add_argument("--output-dir", type=Path, help="覆盖config.output_dir；默认相对config所在目录")
     parser.add_argument("--retry-errors", action="store_true", help="将先前失败/中断的裁判结果加入本次待评；成功结果复用")
     parser.add_argument("--check-only", action="store_true", help="只校验数据并输出input_validation.json；不需要Key")
@@ -496,6 +654,10 @@ def main(argv=None):
     cfg = load_config(cfg_path)
     limit = args.limit if args.limit is not None else cfg.get("limit",100)
     require(limit >= 0, "--limit 不得为负数")
+    workers = args.workers if args.workers is not None else cfg["workers"]
+    per_model = args.workers_per_model if args.workers_per_model is not None else cfg["workers_per_model"]
+    require(workers >= 1, "--workers 必须为正整数")
+    require(per_model >= 0, "--workers-per-model 必须为非负整数")
     entered = args.input or cfg["input_files"]
     require(entered, "请使用 --input 数据集.json，或在config.json的input_files中填写至少一个JSON路径")
     input_paths = []
@@ -546,6 +708,7 @@ def main(argv=None):
     with run_lock(directory):
         db = open_store(store_path, manifest)
         code = 0
+        batch_id = None
         try:
             lookup = {(r["sample_id"],r["judge"]):r["status"] for r in db.execute("SELECT * FROM results")}
             valid = [s for s in samples if not errors[s["sample_id"]]]
@@ -566,19 +729,37 @@ def main(argv=None):
                     require(key and key.isascii() and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key), f"请填写 {j['name']} 的有效api_key，或设置 {j.get('api_key_env','')}；尚未调用API")
                     keys[j["name"]] = key
             print(f"本次计划处理 {len(todo)} 条；limit按样本计数，每条正常产生3次评分请求，重试另计。", flush=True)
-            for index,sample in enumerate(todo,1):
-                print(f"[{index}/{len(todo)}] {sample['sample_id']} ({sample['task']})", flush=True)
-                for j in cfg["judges"]:
-                    if needed(sample,j):
-                        rate_sample(db, sample, j, keys[j["name"]], cfg, list(keys.values()))
-                        print(f"  {j['name']}：已保存", flush=True)
+            if todo:
+                cursor = db.execute("INSERT INTO execution_batches(started_at,workers,workers_per_model,requested_limit,selected_samples,status) VALUES (?,?,?,?,?,'running')", (now(), workers, per_model, limit, len(todo)))
+                batch_id = cursor.lastrowid
+                db.commit()
+                print(f"总请求并发上限：{workers}；每个模型并发上限：{per_model or '不限（受总上限约束）'}。", flush=True)
+            if workers > 1 and todo:
+                rate_parallel(db, todo, cfg["judges"], needed, keys, cfg, workers, per_model)
+            else:
+                for index,sample in enumerate(todo,1):
+                    print(f"[{index}/{len(todo)}] {sample['sample_id']} ({sample['task']})", flush=True)
+                    for j in cfg["judges"]:
+                        if needed(sample,j):
+                            rate_sample(db, sample, j, keys[j["name"]], cfg, list(keys.values()))
+                            print(f"  {j['name']}：已保存", flush=True)
         except KeyboardInterrupt:
             print("已中断，已保存的评分将复用。中断请求请用 --retry-errors 补评。", flush=True)
             code = 130
         except APIError as exc:
             print(f"停止批次：{exc}。修正配置/权限后用 --retry-errors 续跑。", file=sys.stderr, flush=True)
             code = 2
+        except (ValueError, OSError, sqlite3.Error):
+            code = 2
+            raise
         finally:
+            # Covers an interrupt between committing a call and registering its future.
+            db.execute("UPDATE results SET status='uncertain',error='执行中断，调用结果不确定；使用 --retry-errors 补评',updated_at=? WHERE status='running'", (now(),))
+            db.execute("UPDATE calls SET status='uncertain',error='执行中断，未能保存调用结果' WHERE status='running'")
+            if batch_id is not None:
+                status = "interrupted" if code == 130 else "stopped" if code else "finished"
+                db.execute("UPDATE execution_batches SET ended_at=?,status=? WHERE id=?", (now(), status, batch_id))
+                db.commit()
             run = export_reports(db, samples, errors, cfg, directory, human, sources)
             db.close()
         print(f"累计完整三裁判评分 {run['fully_rated_samples']}/{run['valid_samples']} 条；待复核 {run['manual_review_queue_samples']} 条。\n输出：{directory}", flush=True)

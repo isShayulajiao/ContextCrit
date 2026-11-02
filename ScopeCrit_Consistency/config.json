@@ -48,5 +48,7 @@
       "json_mode": false,
       "extra_body": {}
     }
-  ]
+  ],
+  "workers": 1,
+  "workers_per_model": 0
 }
