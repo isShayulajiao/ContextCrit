@@ -63,14 +63,16 @@ def main(argv=None):
     try:
         if options.evaluate_only and options.resume:
             raise ValueError("--evaluate-only 与 --resume 不能同时使用")
-        if options.resume and any(supplied(flag) for flag in ("--max-samples", "--config", "--input")):
-            raise ValueError("续跑必须沿用原数据、模型配置和条数；请勿同时指定 --input、--config 或 --max-samples")
+        if options.resume and any(supplied(flag) for flag in ("--max-samples", "--config", "--input", "--workers")):
+            raise ValueError("续跑必须沿用原数据、模型配置、条数和并发数；请勿指定 --input、--config、--max-samples 或 --workers")
         override_input = take("--input")
         inputs = [str(Path(override_input).expanduser().resolve())] if override_input else settings["inputs"]
         root = take("--run-dir") or settings.get("run_dir")
         if (options.evaluate_only or options.resume) and not root:
             raise ValueError("仅评分或续跑必须填写原运行目录 --run-dir（或配置 run_dir）")
         if not options.resume and not options.evaluate_only:
+            if settings.get("actor_workers") is not None and not supplied("--workers"):
+                remaining.extend(["--workers", str(settings["actor_workers"])])
             if not supplied("--max-samples"):
                 limit = settings["max_samples"]
                 remaining.extend(["--max-samples", "None" if limit is None else str(limit)])
@@ -114,10 +116,13 @@ def main(argv=None):
                 batch_parser = argparse.ArgumentParser(add_help=False)
                 batch_parser.add_argument("--config", default=str(DEFAULT_CONFIG))
                 batch_parser.add_argument("--max-samples", type=parse_max_samples)
+                batch_parser.add_argument("--workers", type=int)
                 batch_options, _ = batch_parser.parse_known_args(remaining)
-                load_config(batch_options.config)
+                launch_config = load_config(batch_options.config)
                 batch["run_parameters"] = {"config": str(Path(batch_options.config).resolve()),
-                                           "max_samples": batch_options.max_samples}
+                                           "max_samples": batch_options.max_samples,
+                                           "workers": (batch_options.workers if batch_options.workers is not None
+                                                       else launch_config["runtime"]["concurrency"])}
                 write_json(batch_path, batch)
         codes = []
         with configured_api(settings):
@@ -142,6 +147,9 @@ def main(argv=None):
                         config_path = parameters.get("config") or settings.get("agent_config")
                         if config_path:
                             args.extend(["--config", config_path])
+                        workers = parameters.get("workers", settings.get("actor_workers"))
+                        if workers is not None:
+                            args.extend(["--workers", str(workers)])
                     code = cli_main(["run", "--input", job["input"], *args])
                 codes.append(code)
                 job["evaluation_exit_code" if options.evaluate_only else "exit_code"] = code

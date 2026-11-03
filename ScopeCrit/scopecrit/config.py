@@ -129,7 +129,7 @@ class ProviderConfig(StrictModel):
 
 
 class RuntimeConfig(StrictModel):
-    concurrency: Literal[1] = 1
+    concurrency: Annotated[int, Field(ge=1, le=32)] = 1
     seed: int = 42
     fail_fast: bool = False
     # None（YAML 写 null）处理全部；正整数处理输入顺序的前 N 条。

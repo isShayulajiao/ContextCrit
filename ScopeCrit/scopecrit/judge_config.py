@@ -77,6 +77,7 @@ class JudgeConfig(StrictModel):
 
 
 class JudgesConfig(StrictModel):
+    workers: Annotated[int, Field(ge=1, le=16)] = 1
     enabled: bool = True
     fixture: bool = False
     judges: Annotated[list[JudgeConfig], Field(min_length=1, max_length=16)]

@@ -4,6 +4,7 @@ inputs:
   - 'F:/2027申博/博士面试/CultCrit-Bench-main/CultCrit-Bench-main/dataset/test.json'
   # - 'F:/其他目录/另一份完整数据集.json'
 agent_config: configs/deepseek.yaml  # 更换答题模型只修改此配置；本地服务示例 configs/local_openai.yaml
+actor_workers: 4   # 同时处理 4 条样本；本地 GPU 模型建议先改为 1
 max_samples: null  # YAML 中 null 表示全部；521 表示前 521 条；命令行 --max-samples None 表示全部
 run_dir: null      # 自动建立输出目录；如需固定路径可填写 runs/experiment_001
 judges_config: configs/judges.yaml

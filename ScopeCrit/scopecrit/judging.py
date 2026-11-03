@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import RLock
 from typing import Literal
 from uuid import uuid4
 
@@ -21,7 +23,7 @@ from .evaluation import evaluate_predictions
 from .judge_config import resolved_base_url
 from .judge_providers import make_judge_provider
 from .schemas import StrictModel
-from .storage import atomic_write
+from .storage import atomic_write, synchronized
 
 
 class Match(StrictModel):
@@ -152,7 +154,8 @@ class JudgeJournal:
     def __init__(self, path, manifest):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path)
+        self.lock = RLock()
+        self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.invocation = uuid4().hex
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -172,6 +175,7 @@ class JudgeJournal:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO metadata VALUES('manifest',?)", (content,))
 
+    @synchronized
     def bind_endpoint(self, name, endpoint):
         key, value = "endpoint:" + name, fingerprint(endpoint)
         old = self.db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
@@ -180,6 +184,7 @@ class JudgeJournal:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)", (key, value))
 
+    @synchronized
     def bind_prediction(self, sample_id, request, prediction):
         """已评分答卷冻结；此前未就绪的样本可以在后续恢复时加入。"""
         key = "prediction:" + sample_id
@@ -190,10 +195,12 @@ class JudgeJournal:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO metadata VALUES(?,?)", (key, value))
 
+    @synchronized
     def latest(self, logical_id):
         row = self.db.execute("SELECT * FROM calls WHERE logical_id=? ORDER BY generation DESC LIMIT 1", (logical_id,)).fetchone()
         return dict(row) if row else None
 
+    @synchronized
     def start(self, logical, judge, sample_id, request, retry_uncertain):
         old = self.latest(logical)
         if old and old["status"] == "COMPLETED":
@@ -212,6 +219,7 @@ class JudgeJournal:
                             (call_id, logical, generation, judge, sample_id, "STARTED", self.invocation, _json(request)))
         return self.latest(logical), True
 
+    @synchronized
     def finish(self, call_id, response=None, error=None):
         with self.db:
             self.db.execute("UPDATE calls SET status=?,response_json=?,error_json=? WHERE call_id=?",
@@ -219,6 +227,7 @@ class JudgeJournal:
                              _json(response) if response is not None else None,
                              _json(error) if error is not None else None, call_id))
 
+    @synchronized
     def calls(self, name=None):
         if name is None:
             rows = self.db.execute("SELECT * FROM calls ORDER BY rowid").fetchall()
@@ -233,6 +242,7 @@ class JudgeJournal:
             result.append(item)
         return result
 
+    @synchronized
     def close(self):
         self.db.close()
 
@@ -360,7 +370,7 @@ def run_judges(predictions, gold_rows, run_dir, config, log=print, retry_uncerta
         for sid, prediction in indexed.items():
             if prediction.get("status") not in ("INPUT_INVALID", "PENDING", "RUNNING", "PAUSED_UNCERTAIN"):
                 journal.bind_prediction(sid, requests[sid], prediction)
-        for judge in judges:
+        def evaluate_judge(judge):
             name = judge["name"]
             folder = directory / hashlib.sha256(name.encode()).hexdigest()[:20]
             records, failures = [], []
@@ -421,9 +431,22 @@ def run_judges(predictions, gold_rows, run_dir, config, log=print, retry_uncerta
             item = {"status": status, "model": judge["model"], "alignment": records, "metrics": metrics,
                     "failures": failures, "eligible_sample_count": eligible, "completed_sample_count": completed,
                     "output_dir": str(folder), "request_stats": stats}
-            result["per_judge"][name] = item
-            result["complete"] &= status == "COMPLETED"
             log(f'[裁判结果] {name}: {status}，完整评分 {completed}/{eligible}')
+            return name, item
+
+        workers = config.get("workers", 1)
+        if type(workers) is not int or not 1 <= workers <= 16:
+            raise ValueError("裁判 workers 必须为 1–16 的整数")
+        if workers == 1:
+            items = map(evaluate_judge, judges)
+            for name, item in items:
+                result["per_judge"][name] = item
+                result["complete"] &= item["status"] == "COMPLETED"
+        else:
+            with ThreadPoolExecutor(max_workers=min(workers, len(judges)), thread_name_prefix="judge") as pool:
+                for name, item in pool.map(evaluate_judge, judges):
+                    result["per_judge"][name] = item
+                    result["complete"] &= item["status"] == "COMPLETED"
         result["request_stats"] = _stats(journal.calls())
         _write(directory / "results.json", result)
         return result

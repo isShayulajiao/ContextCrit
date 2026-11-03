@@ -41,6 +41,7 @@ class LocalSettings(StrictModel):
     input: Annotated[str, Field(min_length=1)] | None = None
     inputs: list[Annotated[str, Field(min_length=1)]] = Field(default_factory=list)
     agent_config: str | None = None
+    actor_workers: Annotated[int, Field(ge=1, le=32)] | None = None
     max_samples: Annotated[int, Field(gt=0)] | None = None
     run_dir: str | None = None
     judges_config: str | None = None

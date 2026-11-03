@@ -2,6 +2,7 @@
 # 真实 Key、Qwen 业务空间地址和网关覆盖地址在 settings.local.yaml 中填写。
 # 本文件通过内部变量名接收本地设置，不要求用户设置环境变量。
 enabled: true
+workers: 3  # 三个裁判同时工作；每位裁判内部按样本顺序评分
 fixture: false
 max_api_retries: 2
 max_format_repairs: 1

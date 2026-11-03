@@ -11,6 +11,8 @@ import json
 import os
 import sqlite3
 import tempfile
+from functools import wraps
+from threading import RLock
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -49,13 +51,22 @@ def atomic_write(path: Path | str, text: str) -> None:
             os.unlink(temporary)
 
 
+def synchronized(method):
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return guarded
+
+
 class Store:
     """所有样本都存入一份数据库；sample_id 不参与磁盘路径拼接。"""
 
     def __init__(self, run_dir: Path | str):
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.run_dir / "state.sqlite3")
+        self.lock = RLock()
+        self.db = sqlite3.connect(self.run_dir / "state.sqlite3", check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -97,6 +108,7 @@ class Store:
             );
         """)
 
+    @synchronized
     def initialize(self, manifest: dict) -> None:
         """初始化新运行；已有运行只允许完全相同的输入、配置及版本指纹。"""
         content = _json(manifest)
@@ -108,10 +120,12 @@ class Store:
         atomic_write(self.run_dir / "manifest.json",
                      json.dumps(_safe(manifest), ensure_ascii=False, indent=2) + "\n")
 
+    @synchronized
     def get_state(self, sample_id: str) -> dict | None:
         row = self.db.execute("SELECT state_json FROM episodes WHERE sample_id=?", (sample_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    @synchronized
     def save_state(self, sample_id: str, state: dict, event: dict | None = None,
                    messages: list[dict] | None = None, prediction: dict | None = None) -> None:
         """动作事件、完整 checkpoint、消息 outbox、预测在一个事务中写入。
@@ -171,6 +185,7 @@ class Store:
         else:
             self.db.execute("INSERT INTO messages VALUES(?,?,?)", (message_id, sample_id, content))
 
+    @synchronized
     def get_call(self, call_id: str) -> dict | None:
         row = self.db.execute("SELECT * FROM model_calls WHERE call_id=?", (call_id,)).fetchone()
         return self._call_dict(row) if row else None
@@ -184,6 +199,7 @@ class Store:
                 "response": json.loads(row["response_json"]) if row["response_json"] else None,
                 "error": json.loads(row["error_json"]) if row["error_json"] else None}
 
+    @synchronized
     def start_call(self, call_id: str, sample_id: str, stage: str, request: dict) -> None:
         content = _json(request)
         old = self.get_call(call_id)
@@ -196,6 +212,7 @@ class Store:
                             (call_id, sample_id, stage, "STARTED", content,
                              hashlib.sha256(content.encode("utf-8")).hexdigest()))
 
+    @synchronized
     def complete_call(self, call_id: str, response: dict) -> None:
         old = self.get_call(call_id)
         if old is None:
@@ -209,6 +226,7 @@ class Store:
             self.db.execute("UPDATE model_calls SET status='COMPLETED',response_json=?,error_json=NULL "
                             "WHERE call_id=?", (content, call_id))
 
+    @synchronized
     def fail_call(self, call_id: str, error: dict) -> None:
         old = self.get_call(call_id)
         if old is None:
@@ -219,6 +237,7 @@ class Store:
             self.db.execute("UPDATE model_calls SET status='FAILED',error_json=? WHERE call_id=?",
                             (_json(error), call_id))
 
+    @synchronized
     def uncertain_calls(self, sample_id: str | None = None) -> list[dict]:
         query = "SELECT * FROM model_calls WHERE status='STARTED'"
         parameters = ()
@@ -227,18 +246,23 @@ class Store:
             parameters = (sample_id,)
         return [self._call_dict(row) for row in self.db.execute(query + " ORDER BY rowid", parameters)]
 
+    @synchronized
     def list_states(self) -> list[dict]:
         return self._list_json("episodes", "state_json")
 
+    @synchronized
     def list_predictions(self) -> list[dict]:
         return self._list_json("predictions", "prediction_json")
 
+    @synchronized
     def list_events(self) -> list[dict]:
         return self._list_json("events", "event_json")
 
+    @synchronized
     def list_messages(self) -> list[dict]:
         return self._list_json("messages", "message_json")
 
+    @synchronized
     def list_calls(self) -> list[dict]:
         return [self._call_dict(row) for row in self.db.execute("SELECT * FROM model_calls ORDER BY rowid")]
 
@@ -246,6 +270,7 @@ class Store:
         # table/column 仅由上面的固定方法传入，用户输入不用于 SQL 标识符。
         return [json.loads(row[0]) for row in self.db.execute(f"SELECT {column} FROM {table} ORDER BY rowid")]
 
+    @synchronized
     def export(self) -> dict:
         """从已提交事务导出；API 未报告的 token 不会被当作零。"""
         predictions = self.list_predictions()
@@ -263,5 +288,6 @@ class Store:
         atomic_write(self.run_dir / "progress.json", json.dumps(progress, ensure_ascii=False, indent=2) + "\n")
         return progress
 
+    @synchronized
     def close(self) -> None:
         self.db.close()

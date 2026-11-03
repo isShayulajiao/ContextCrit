@@ -4,6 +4,8 @@
 
 ## 可复现检查命令
 
+2026-11-04 并发更新：全套 `254 passed`，新增 16 项并发及配置检查。本次只调整并发调度、线程安全存储和相应参数，不修改 Agent 决策流程、评分规则、模型请求参数或数据格式。线程屏障确认 4 个答题样本和 3 位裁判确实重叠执行；真实 OpenAI SDK 使用 MockTransport 验证四线程完成 T1–T4。SQLite 完整性、缓存不重复请求、认证失败后停止调度并保留 PENDING，以及多文件恢复继承原并发数均通过。没有调用真实付费接口。
+
 ```bash
 python -m pytest -q
 python run.py --input examples/merged_demo.json --config configs/mock.yaml --run-dir runs/demo --no-judge

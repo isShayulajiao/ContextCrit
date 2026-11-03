@@ -18,6 +18,7 @@ inputs:
   - 'F:\2027申博\博士面试\CultCrit-Bench-main\CultCrit-Bench-main\dataset\test.json'
   # 可继续添加其他数据文件绝对路径
 agent_config: configs/deepseek.yaml
+actor_workers: 4
 max_samples: null
 run_dir: null
 judges_config: configs/judges.yaml
@@ -44,6 +45,20 @@ python run.py --settings settings.local.yaml --max-samples None
 不填写 `--settings` 时默认读取程序目录的 `settings.local.yaml`。`max_samples: null` 也表示全部；命令行优先。条数指 JSON 数组中的**任务样本数**，不是评论文档数；选中一条 T3 后仍完整运行它的全部轮次。
 
 `settings.local.yaml` 已加入 Git 忽略。真实 Key 不填入公开模板或 Python 源码，不写入运行清单与报表。用户无需执行 `export` 或设置系统环境变量；程序在当前进程内向 SDK 提供认证。
+
+## 并发运行
+
+`settings.local.yaml` 的 `actor_workers: 4` 表示 DeepSeek 最多同时处理 4 条任务样本；也可用 `--workers 4` 覆盖（范围 1–32）。先完成本数据文件的答题阶段，再开始三个裁判的并发评分，尚未完成的答卷不会交给裁判。
+
+`configs/judges.yaml` 的顶层 `workers: 3` 表示最多 3 位裁判同时工作。每位裁判内部仍逐样本评分；这是总计最多 3 个评分请求同时在途，而不是每个裁判各 3 个请求。改为 `1` 可串行评分。
+
+```bash
+python run.py --settings settings.local.yaml --max-samples 20 --workers 4 --run-dir runs/parallel_001
+```
+
+并发边界为不同任务样本；同一条 T3 的轮次、同一条 T4 的消息交接和提交顺序不变。数据库事务和导出使用锁保护，不把网络调用放入数据库锁。遇到认证错误或 fail_fast 时停止启动新样本，已经在途的样本保存后退出；未启动样本保持 PENDING。中断也先等待在途工作收尾，再关闭状态库。
+
+续跑会继承原运行的并发数，不要同时指定 `--workers`。更新代码后首次并发实验使用新输出目录；旧版本运行继续使用对应旧版本代码恢复。API 返回 429 时沿用原有退避重试，可降低并发数后新建实验。本地模型建议从 `actor_workers: 1` 开始，按推理服务容量调整。
 
 ## 答题模型与三个裁判
 

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 from uuid import uuid4
+from threading import local
 
 from tqdm import tqdm
 
@@ -16,6 +17,7 @@ from .data import fingerprint, load_dataset, sample_key
 from .engine import Engine, new_state
 from .evaluation import alignment_template, evaluate_predictions
 from .providers import make_provider
+from .parallel import bounded_results
 from .storage import Store
 
 
@@ -116,12 +118,17 @@ def automatic_score(store, rows, run_dir, judge_config, structural, log=tqdm.wri
 
 
 def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=False, max_samples=UNSET,
-        judges_config=None, no_judge=False, retry_uncertain_judges=False):
+        judges_config=None, no_judge=False, retry_uncertain_judges=False, workers=None):
     config = load_config(config_path)
     if max_samples is not UNSET:
         if max_samples is not None and (type(max_samples) is not int or max_samples <= 0):
             raise ValueError("max_samples 必须是正整数或 None")
         config["runtime"]["max_samples"] = max_samples
+    if workers is not None:
+        if type(workers) is not int or not 1 <= workers <= 32:
+            raise ValueError("workers 必须为 1–32 的整数")
+        config["runtime"]["concurrency"] = workers
+    workers = config["runtime"]["concurrency"]
     selected_limit = config["runtime"]["max_samples"]
     tqdm.write("[准备] 读取配置并选择待处理记录；不拆分 train/test")
     rows, report = load_dataset(input_path, fixture=config["fixture"], max_samples=selected_limit)
@@ -155,7 +162,8 @@ def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=Fal
                 state["status"] = "PENDING"
                 store.save_state(key, state)
         tqdm.write(f'[校验] 总计 {report["total"]} 条，无效 {len(report["invalid"])} 条')
-        for index, row in enumerate(tqdm(rows, desc="数据集进度", unit="条", dynamic_ncols=True)):
+        jobs = []
+        for index, row in enumerate(rows):
             key = sample_key(row, index)
             if key in report["invalid"]:
                 state = {"sample_id": key, "doc_id": row.get("doc_id") if isinstance(row, dict) else None,
@@ -168,16 +176,41 @@ def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=Fal
                 store.save_state(key, state, prediction=prediction)
                 tqdm.write(f"[隔离] {key}: {'; '.join(report['invalid'][key])}")
                 continue
-            engine = Engine(row, config, provider, store, log=tqdm.write, retry_uncertain=retry_uncertain)
-            result = engine.run()
-            tqdm.write(f'[结果] {key} → {result["status"]} ({result["termination_reason"]})')
+            jobs.append(row)
+
+        thread_providers = local()
+
+        def execute_sample(row):
+            if workers == 1:
+                selected = provider
+            else:
+                if not hasattr(thread_providers, "provider"):
+                    thread_providers.provider = make_provider(config)
+                selected = thread_providers.provider
+            return Engine(row, config, selected, store, log=tqdm.write,
+                          retry_uncertain=retry_uncertain).run()
+
+        fatal_codes = {"API_400", "API_401", "API_403", "API_404", "API_422"}
+
+        def stop_batch(result):
+            return (result["termination_reason"] in fatal_codes or
+                    (config["runtime"]["fail_fast"] and result["status"] != "COMPLETED"))
+
+        tqdm.write(f"[并发] 答题样本 workers={workers}；T3/T4 各样本内部保持有序")
+        results = (bounded_results(execute_sample, jobs, workers, stop_batch) if workers > 1
+                   else ((row, execute_sample(row)) for row in jobs))
+        try:
+            for row, result in tqdm(results, total=len(jobs), desc="数据集进度", unit="条", dynamic_ncols=True):
+                key = row["sample_id"]
+                tqdm.write(f'[结果] {key} → {result["status"]} ({result["termination_reason"]})')
+                store.export()
+                if stop_batch(result):
+                    tqdm.write("[停止调度] 保留未启动记录为 PENDING，正在处理的样本保存后退出")
+                    if workers == 1:
+                        break
+        finally:
+            results.close()
             store.export()
-            if result["termination_reason"] in ("API_400", "API_401", "API_403", "API_404", "API_422"):
-                tqdm.write("[停止批次] API 请求或认证被拒绝；其余记录保留 PENDING，请检查模型参数与密钥")
-                break
-            if config["runtime"]["fail_fast"] and result["status"] != "COMPLETED":
-                break
-        store.export()
         structural = score(store, rows, run_dir)
         judging_complete = True
         if judges is not None:
@@ -205,6 +238,7 @@ def main(argv=None):
     execute.add_argument("--run-dir", help="省略时自动创建唯一的 runs/deepseek_* 输出目录")
     execute.add_argument("--max-samples", type=parse_max_samples, default=UNSET,
                          help="处理输入顺序的前 N 条；None 处理全部；省略时使用配置")
+    execute.add_argument("--workers", type=int, help="同时答题的样本数，1–32；不并行单样本内部步骤")
     execute.add_argument("--judges-config", help="独立裁判配置，指定即启用自动评分")
     execute.add_argument("--no-judge", action="store_true", help="本次只生成预测和程序结构指标，不调用裁判")
     execute.add_argument("--retry-uncertain-judges", action="store_true", help="显式重试不确定裁判请求，可能重复计费")
@@ -236,11 +270,12 @@ def main(argv=None):
                 raise ValueError("--no-judge 与 --judges-config 不能同时使用")
             return run(args.input, args.config, args.run_dir, max_samples=args.max_samples,
                        judges_config=args.judges_config, no_judge=args.no_judge,
-                       retry_uncertain_judges=args.retry_uncertain_judges)
+                       retry_uncertain_judges=args.retry_uncertain_judges, workers=args.workers)
         manifest = json.loads((Path(args.run_dir) / "manifest.json").read_text(encoding="utf-8"))
         if args.command == "resume":
             return run(manifest["input_path"], manifest["config_path"], args.run_dir, True, args.retry_uncertain,
                        max_samples=manifest["config"]["runtime"]["max_samples"],
+                       workers=manifest["config"]["runtime"]["concurrency"],
                        judges_config=args.judges_config, no_judge=args.no_judge,
                        retry_uncertain_judges=args.retry_uncertain_judges)
         store = Store(args.run_dir)
