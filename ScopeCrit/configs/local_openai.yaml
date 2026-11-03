@@ -1,0 +1,31 @@
+# 本地服务必须提供 OpenAI Chat Completions 接口；此配置不会加载模型权重。
+# 例如先启动 vLLM/LM Studio/llama.cpp 等兼容服务；模型名填写服务实际公开的名称。
+provider:
+  kind: openai
+  model: Qwen/Qwen3-1.7B
+  base_url: http://127.0.0.1:8000/v1
+  api_key_env: null  # 仅限本机回环地址的无认证服务；SDK 发送 local-no-auth 占位值
+  timeout_seconds: 180.0
+  response_format_json: false
+  max_output_tokens: 4096
+  # 以下是 vLLM 等服务的 Qwen non-thinking 参数；其他服务不支持时删除此项。
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+runtime:
+  max_samples: null
+evaluation:
+  semantic_alignment: llm
+  enable_paid_judge: true
+  judges_config: judges.yaml
+
+# 如只希望 ACTION 用本地模型，默认 provider 改为 DeepSeek，并在独立覆盖项填写：
+# stage_providers:
+#   ACTION:
+#     kind: openai
+#     model: Qwen/Qwen3-1.7B
+#     base_url: http://127.0.0.1:8000/v1
+#     api_key_env: null
+#     extra_body:
+#       chat_template_kwargs:
+#         enable_thinking: false

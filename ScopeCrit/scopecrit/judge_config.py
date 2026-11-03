@@ -1,7 +1,8 @@
-"""四模型裁判配置：文件只保存变量名，不保存密钥。
+"""独立裁判配置：共享配置只保存内部变量名，不保存密钥。
 
 答题 Agent 与裁判使用不同的配置与独立会话。Qwen 的业务空间地址从
 DASHSCOPE_BASE_URL 读取，因为用户所在地域和 WorkspaceId 无法猜测。
+这些运行时值可由本地设置载入，无须用户手动导出环境变量。
 """
 from __future__ import annotations
 
@@ -40,7 +41,9 @@ class JudgeConfig(StrictModel):
     api_key_env: Nonempty
     temperature: Annotated[float, Field(ge=0, le=2)] | None = None
     reasoning_effort: str | None = None
+    # DeepSeek 与 Qwen 使用不同的 thinking 请求结构，不能互相替代。
     thinking_enabled: bool | None = None
+    enable_thinking: bool | None = None
     response_format_json: bool = False
     timeout_seconds: Annotated[float, Field(gt=0)] = 180.0
     max_output_tokens: Positive = 8192
@@ -68,6 +71,8 @@ class JudgeConfig(StrictModel):
     def check_endpoint(self):
         if self.provider == "openai" and self.base_url is None and self.base_url_env is None:
             raise ValueError("OpenAI 兼容裁判必须指定接口地址或地址环境变量")
+        if self.thinking_enabled is not None and self.enable_thinking is not None:
+            raise ValueError("不能同时配置 DeepSeek thinking_enabled 与 Qwen enable_thinking")
         return self
 
 
@@ -115,11 +120,11 @@ def resolved_base_url(judge: dict) -> str | None:
         if not value:
             if judge.get("base_url"):
                 return judge["base_url"]
-            raise ValueError(f"请先设置环境变量 {name}")
+            raise ValueError(f"未配置接口地址（{name}），请在本地设置中填写对应地址")
         try:
             return validate_base_url(value)
         except (ValueError, TypeError):
-            raise ValueError(f"环境变量 {name} 不是有效的真实 HTTPS 接口地址") from None
+            raise ValueError(f"运行时配置 {name} 不是有效的真实 HTTPS 接口地址") from None
     return judge.get("base_url")
 
 
@@ -139,3 +144,4 @@ def preflight_credentials(config: dict) -> list[dict]:
                 outcome.update(status="invalid", error_code="INVALID_BASE_URL")
         outcomes.append(outcome)
     return outcomes
+

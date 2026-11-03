@@ -111,7 +111,7 @@ def automatic_score(store, rows, run_dir, judge_config, structural, log=tqdm.wri
     write_report(report, run_dir)
     log(format_console(report))
     log("[裁判汇总] 各裁判、各任务和逐样本指标：judge_summary.json / metrics_summary.csv / per_sample_metrics.csv / report.md")
-    log("[裁判汇总] 四裁判均完成才给出正式均值；缺失项为 null，另列可用结果及评分覆盖率")
+    log(f"[裁判汇总] 全部 {len(judge_config['judges'])} 位裁判均完成才给出正式均值；缺失项为 null，另列可用结果及评分覆盖率")
     return result["complete"]
 
 
@@ -129,8 +129,11 @@ def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=Fal
     run_dir = Path(run_dir) if run_dir is not None else default_run_dir()
     if not resume and (run_dir / "state.sqlite3").exists():
         raise ValueError("运行目录已存在；请使用 resume 或指定新的 --run-dir")
-    if config["provider"]["kind"] == "mock" and not config["fixture"]:
-        raise ValueError("Mock 只验证人工 fixture 流程；请使用 fixture: true，真实数据请选择 DeepSeek")
+    routes = config.get("stage_providers", {})
+    effective = [routes.get(stage, config["provider"])
+                 for stage in ("ACTION", "SUPPORT_CHECK", "SCOPE_COMPARE")]
+    if any(provider["kind"] == "mock" for provider in effective) and not config["fixture"]:
+        raise ValueError("Mock 只验证人工 fixture 流程；请使用 fixture: true，真实数据请选择真实模型后端")
     judges = None if no_judge else judge_configuration(config, judges_config)
     if judges is not None:
         from .judge_config import preflight_credentials
@@ -169,7 +172,7 @@ def run(input_path, config_path, run_dir=None, resume=False, retry_uncertain=Fal
             result = engine.run()
             tqdm.write(f'[结果] {key} → {result["status"]} ({result["termination_reason"]})')
             store.export()
-            if result["termination_reason"] in ("API_400", "API_401", "API_403"):
+            if result["termination_reason"] in ("API_400", "API_401", "API_403", "API_404", "API_422"):
                 tqdm.write("[停止批次] API 请求或认证被拒绝；其余记录保留 PENDING，请检查模型参数与密钥")
                 break
             if config["runtime"]["fail_fast"] and result["status"] != "COMPLETED":
@@ -274,3 +277,4 @@ def main(argv=None):
 
 def entrypoint():
     sys.exit(main())
+

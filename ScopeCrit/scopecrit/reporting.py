@@ -1,4 +1,4 @@
-"""四裁判的同指标平均与报告。
+"""独立裁判的同指标平均与报告。
 
 程序可核验的指标只计算一次。语义指标必须覆盖本次所选目标，且所有
 预定裁判都有有效结果才给出正式均值；不足时只给明确标注的可用均值。
@@ -359,3 +359,4 @@ def write_report(report, run_dir):
         lines.append(f'| {row["task"] or "overall"} | {row["metric"]} | {number(row.get("mean"))} | {number(row.get("available_mean"))} | {judges} |')
     lines.extend(["", "## 固定综合分定义", "", "- T1：方面 Micro-F1、立场 Macro-F1、证据 F1 等权。", "- T2：主张 Micro-F1、关系解释质量、证据 F1 等权；关系质量 correct=1、partial=0.5、incorrect=0。", "- T3：所有预期轮次 Memory F1 等权；False Overwrite 只作诊断。", "- T4：语义 Task Success；交换召回率作为诊断指标单列。", "- 权限和引用错误作为独立诊断，不覆盖原始指标均值；T4 成功仍包含逐样本权限条件。", "- 四任务综合分等权宏平均，缺少任务时正式整体分为 null。", "", "各裁判原始指标、程序计数与逐样本指标保存在 judge_summary.json；费用与失败记录不混入质量分。", "模型评分不是人工金标准；演示分数不代表真实模型能力。", ""])
     atomic_write(directory / "report.md", "\n".join(lines))
+

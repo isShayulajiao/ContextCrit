@@ -1,4 +1,4 @@
-# 真正调用官方服务前，只需设置 DEEPSEEK_API_KEY 一个环境变量。
+# 默认答题模型；真实 Key 填在 settings.local.yaml 的 api_keys.deepseek。
 provider:
   kind: deepseek
   model: deepseek-flash
@@ -18,3 +18,4 @@ evaluation:
   semantic_alignment: llm
   enable_paid_judge: true
   judges_config: judges.yaml
+

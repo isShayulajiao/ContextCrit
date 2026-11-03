@@ -151,12 +151,13 @@ def test_format_repair_is_separate_recorded_call(dataset, tmp_path, monkeypatch)
     assert report["request_stats"]["total_tokens"] is None
 
 
-def test_auth_failure_stops_one_judge_others_continue(dataset, tmp_path, monkeypatch):
+@pytest.mark.parametrize("error_status", [400, 401, 403, 404, 422])
+def test_fatal_api_failure_stops_one_judge_others_continue(dataset, tmp_path, monkeypatch, error_status):
     samples, predictions, annotations = dataset
     seen = []
 
     class Unauthorized(Exception):
-        status_code = 401
+        status_code = error_status
 
     class FailedProvider:
         def complete(self, *args):

@@ -1,6 +1,7 @@
 """裁判 API 适配：各自独立客户端、独立请求，不复用答题 Agent 会话。
 
-DeepSeek/Qwen/Grok 使用 OpenAI 兼容接口，GLM 使用用户给出的 zai-sdk。
+Qwen、MiniMax 和 Gemini 网关使用 OpenAI 兼容接口。保留旧版 DeepSeek、
+Grok 和 GLM 配置的支持，其中 GLM 使用 zai-sdk。
 SDK 重试统一设为零，实际重试次数由上层裁判运行器记录。
 """
 from __future__ import annotations
@@ -36,7 +37,7 @@ class JudgeProvider:
         name = self.judge["api_key_env"]
         key = os.environ.get(name)
         if not key:
-            raise ValueError(f"请先设置环境变量 {name}")
+            raise ValueError(f"未配置裁判 API Key（{name}），请在本地设置的 api_keys 中填写对应密钥")
         endpoint = resolved_base_url(self.judge)
         options = {"api_key": key, "timeout": self.judge["timeout_seconds"], "max_retries": 0}
         if endpoint:
@@ -67,6 +68,8 @@ class JudgeProvider:
             kwargs["reasoning_effort"] = judge["reasoning_effort"]
         if judge["thinking_enabled"] is not None:
             kwargs["extra_body"] = {"thinking": {"type": "enabled" if judge["thinking_enabled"] else "disabled"}}
+        if judge["enable_thinking"] is not None:
+            kwargs["extra_body"] = {"enable_thinking": judge["enable_thinking"]}
         if judge["response_format_json"]:
             kwargs["response_format"] = {"type": "json_object"}
         start = time.perf_counter()
@@ -76,3 +79,4 @@ class JudgeProvider:
 
 def make_judge_provider(judge: dict) -> JudgeProvider:
     return JudgeProvider(judge)
+

@@ -237,7 +237,7 @@ def load_dataset(path: str | Path, fixture: bool = False, max_samples: int | Non
     if max_samples is not None and (type(max_samples) is not int or max_samples <= 0):
         raise ValueError("max_samples 必须是正整数或 None")
     try:
-        rows = json.loads(Path(path).read_text(encoding="utf-8"), parse_constant=_reject_nonfinite)
+        rows = json.loads(Path(path).read_text(encoding="utf-8-sig"), parse_constant=_reject_nonfinite)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError(f"无法读取 JSON 数据集: {exc}") from exc
     if not isinstance(rows, list):
@@ -287,3 +287,4 @@ def load_dataset(path: str | Path, fixture: bool = False, max_samples: int | Non
             warnings.append("同正文同书名存在多个 doc_id: " + ", ".join(sorted({row["doc_id"] for _, row in group})))
     return rows, {"valid": not invalid, "total": len(rows), "source_total": source_total,
                   "max_samples": max_samples, "invalid": invalid, "warnings": warnings}
+

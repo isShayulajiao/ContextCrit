@@ -36,7 +36,7 @@ def test_direct_script_missing_key_is_clear_and_creates_no_run(tmp_path, monkeyp
     source = tmp_path / "input.json"
     source.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
     result = subprocess.run(
-        [sys.executable, str(ROOT / "run.py"), "--input", str(source)],
+        [sys.executable, str(ROOT / "run.py"), "--input", str(source), "--no-judge"],
         cwd=tmp_path, capture_output=True, text=True, timeout=20,
     )
     assert result.returncode == 2
@@ -108,3 +108,4 @@ def test_json_path_and_key_use_real_sdk_serialization_for_all_tasks(tmp_path, mo
         output = (run_dir / filename).read_text()
         assert fake_key not in output
         assert "PRIVATE_REASONING_NOT_FOR_LOGS_CANARY" not in output
+

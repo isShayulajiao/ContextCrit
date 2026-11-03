@@ -7,6 +7,7 @@ import pytest
 
 from scopecrit.config import Config
 from scopecrit.engine import Engine, ToolError
+from scopecrit.evaluation import evaluate_predictions
 from scopecrit.storage import Store
 
 
@@ -208,6 +209,19 @@ def test_uncertain_call_pauses_without_contacting_provider(tmp_path):
     assert len(store.uncertain_calls()) == 1
     assert output["usage"]["usage_complete"] is False
     assert output["usage"]["total_tokens"] is None
+    assert output["prediction"]["claims"] == []
+    assert output["prediction"]["answer"] == ""
+    scoring_sample = sample()
+    scoring_sample.update(events=[], roles={}, required_exchanges=[])
+    scoring_sample["gold"] = {
+        "claims": [{"claim_id": "C1", **claim()}],
+        "required_evidence_ids": ["E001"],
+    }
+    metrics = evaluate_predictions([output], [scoring_sample])
+    assert metrics["per_sample"][0]["scoring_status"] == "not_run"
+    assert metrics["per_sample"][0]["needs_alignment"] is False
+    assert metrics["overall"]["evidence_f1"] is None
+    assert metrics["overall"]["evidence_scored_count"] == 0
 
 
 def test_t3_resume_uncertain_keeps_one_snapshot_per_turn_and_unknown_old_usage(tmp_path):
@@ -343,3 +357,4 @@ def test_timeout_retries_are_budgeted_and_unknown_usage_not_zero(tmp_path, monke
     assert output["usage"]["usage_complete"] is False
     assert store.list_calls()[0]["status"] == "FAILED"
     assert "人工超时" not in json.dumps(store.list_calls(), ensure_ascii=False)
+

@@ -298,7 +298,7 @@ def _call(journal, provider, judge, sample_id, request, prompt, config, repair, 
             retryable = status == 429 or (type(status) is int and 500 <= status < 600)
             retryable |= type(exc).__name__ in ("APIConnectionError", "APITimeoutError", "TimeoutError", "ConnectionError")
             code = f"API_{status or type(exc).__name__}"
-            fatal = status in (400, 401, 403)
+            fatal = status in (400, 401, 403, 404, 422)
             journal.finish(row["call_id"], error={"code": code, "retryable": retryable, "fatal": fatal})
             if retryable and attempt < config.get("max_api_retries", 2):
                 time.sleep(min(2 ** attempt, 8))

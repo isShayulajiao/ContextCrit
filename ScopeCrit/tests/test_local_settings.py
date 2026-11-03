@@ -28,7 +28,8 @@ def test_relative_paths_resolve_against_private_file_not_cwd(tmp_path, monkeypat
 def test_default_none_and_empty_keys_are_allowed_until_provider_preflight(tmp_path):
     result = load_local_settings(local_file(tmp_path, {"input": "input.json"}))
     assert result["max_samples"] is None
-    assert result["api_keys"] == {"deepseek": "", "glm": "", "qwen": "", "grok": ""}
+    assert result["api_keys"] == {name: "" for name in
+                                  ("deepseek", "glm", "qwen", "grok", "minimax", "gemini", "actor")}
     assert result["run_dir"] is None and result["judges_config"] is None
 
 
@@ -120,3 +121,4 @@ def test_unknown_field_names_do_not_disclose_accidentally_misplaced_keys(tmp_pat
     with pytest.raises(ValueError) as caught:
         load_local_settings(local_file(tmp_path, {"input": "input.json", "api_keys": {secret: ""}}))
     assert secret not in str(caught.value)
+

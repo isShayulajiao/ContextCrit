@@ -1,173 +1,163 @@
-# ScopeCrit：文学评论 Agent 与四模型自动评测
+# ScopeCrit：文学评论 Agent 与三裁判评测
 
-单个 JSON 数组输入，不训练模型、不重新划分数据。DeepSeek 完成 T1–T4；
-答题结束后，四个独立裁判分别对齐预测与 gold，程序计算指标，再对相同指标取平均。
-搜索仍为字符二元组 Jaccard；无需下载模型、安装 PyTorch 或配置 GPU。
+ScopeCrit 读取已构造完成的 T1–T4 数据集，以 `deepseek-flash` 运行 Agent，再由三个独立模型评分：`qwen3.8-flash`、`minimax-m3.1-flash`、`gemini-3.1-flash-lite`。支持一个或多个数据文件、每文件处理条数上限、断点续跑和单独评分。程序不训练模型，不修改输入，不重新划分 train/test。
 
-## 1. 安装：Python 3.11 或以上
+## 快速开始
 
-推荐 Python 3.11，本次实测 Python 3.12。
+需要 Python 3.11 或以上。进入 `CultCrit-Bench/ScopeCrit` 目录：
 
 ```bash
-conda create -n scopecrit python=3.11 -y
-conda activate scopecrit
-cd /你的路径/CultCrit-Bench/ScopeCrit
-python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+python -m pip install -r requirements-lock.txt
+python -m pip install --no-deps -e .
 ```
 
-没有 Conda 可以使用 `python3 -m venv .venv`，激活后安装 requirements。
-依赖包括 OpenAI SDK、智谱官方 `zai-sdk`、Pydantic、PyYAML、tqdm 和 pytest。
-`requirements-lock.txt` 保存本次验证的精确依赖版本。
-**直接运行 `python run.py` 不需要 `pip install -e .`。**
-
-## 2. 直接填写 API Key，不需要设置环境变量
-
-复制模板：
-
-```bash
-cp settings.example.yaml settings.local.yaml
-```
-
-Windows PowerShell 使用 `Copy-Item settings.example.yaml settings.local.yaml`。
-然后在 **settings.local.yaml** 中填写：
+复制 `settings.example.yaml` 为 `settings.local.yaml`，在**复制的本地文件**直接填写路径和 API Key。Windows 可以手动复制，或执行 `Copy-Item settings.example.yaml settings.local.yaml`；Linux/macOS 执行 `cp settings.example.yaml settings.local.yaml`。
 
 ```yaml
-input: ../CritPred_test.json
+inputs:
+  - 'F:\2027申博\博士面试\CultCrit-Bench-main\CultCrit-Bench-main\dataset\test.json'
+  # 可继续添加其他数据文件绝对路径
+agent_config: configs/deepseek.yaml
 max_samples: null
 run_dir: null
 judges_config: configs/judges.yaml
 api_keys:
-  deepseek: "填你的 DeepSeek Key"
-  glm: "填你的智谱 Key"
-  qwen: "填你的 Qwen Key"
-  grok: "填你的 apikey.fan 服务 Key"
-qwen_workspace_id: "填你的业务空间ID"
-qwen_base_url: ""
-grok_base_url: https://api.apikey.fan/v1
+  deepseek: '填写 DeepSeek API Key'
+  qwen: '填写阿里云百炼 API Key'
+  minimax: '填写 APIKEY.FAN API Key'
+  gemini: '填写 APIKEY.FAN API Key'
+qwen_workspace_id: '填写北京业务空间 ID'
+qwen_base_url: ''
+minimax_base_url: https://api.apikey.fan/v1
+gemini_base_url: https://api.apikey.fan/v1
 ```
 
-Qwen 固定为 **华北 2（北京），`qwen3.8-flash`**。程序根据业务空间 ID 构造：
-`https://业务空间ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`。
-地域不能替代业务空间 ID，程序无法从 API Key 推断 WorkspaceId。
-如果使用完整 `qwen_base_url`，请将 `qwen_workspace_id` 留空，二者选一个。
+Windows 路径使用 YAML **单引号**，避免反斜杠被当作转义字符。Linux 示例为 `/home/user/dataset/test.json`。相对路径以本地设置文件所在目录为基准。`inputs` 与兼容旧版本的单文件 `input` 只能填写一个；使用 `inputs` 时删除旧的 `input` 行。
 
-数据和输出等相对路径以本地设置文件所在目录为基准。
-**settings.local.yaml 已加入 Git 忽略，不会放入运行 manifest、提示词或报表。**
-GitHub 上只提交空模板；不要把真实 Key 填进 settings.example.yaml 或 Python 源码。
-SDK 所需的认证在程序内部处理，不要求用户执行 export。
-
-填好后直接运行：
+先处理每个文件前 4 条任务，再处理全部：
 
 ```bash
-python run.py
+python run.py --settings settings.local.yaml --max-samples 4
+python run.py --settings settings.local.yaml --max-samples None
 ```
 
-输出目录默认自动生成并打印。默认先检查四家配置是否齐全，再开始答题，避免答完后才发现无法评分。
-可通过 `--settings /路径/私有配置.yaml` 使用其他本地文件。
+不填写 `--settings` 时默认读取程序目录的 `settings.local.yaml`。`max_samples: null` 也表示全部；命令行优先。条数指 JSON 数组中的**任务样本数**，不是评论文档数；选中一条 T3 后仍完整运行它的全部轮次。
 
-## 3. 四个裁判的调用方式
+`settings.local.yaml` 已加入 Git 忽略。真实 Key 不填入公开模板或 Python 源码，不写入运行清单与报表。用户无需执行 `export` 或设置系统环境变量；程序在当前进程内向 SDK 提供认证。
 
-| 裁判 | 默认 model | SDK / 地址 |
+## 答题模型与三个裁判
+
+| 用途 | 模型 ID | 接口 |
 |---|---|---|
-| DeepSeek | `deepseek-flash` | OpenAI，`https://api.deepseek.com`；high reasoning，thinking enabled |
-| GLM | `glm-4.5-air` | 智谱官方 `zai-sdk` 的 `ZhipuAiClient` |
-| Qwen | `qwen3.8-flash` | OpenAI，北京业务空间地址 |
-| Grok | `grok-build-0.1` | OpenAI，用户指定的 `api.apikey.fan` 服务，默认 `/v1` |
+| ScopeCrit 决策、支持核对和范围比较 | `deepseek-flash` | `https://api.deepseek.com` |
+| 独立裁判一 | `qwen3.8-flash` | 百炼北京业务空间 OpenAI 兼容接口 |
+| 独立裁判二 | `minimax-m3.1-flash` | `https://api.apikey.fan/v1` |
+| 独立裁判三 | `gemini-3.1-flash-lite` | `https://api.apikey.fan/v1` |
 
-配置在 `configs/judges.yaml`。按用户明确要求选择模型，**不会悄悄换成 Qwen Max、GLM-5.3 或其他模型**。
-Grok 的 `/v1` 是兼容接口约定，实际路径可在本地 `grok_base_url` 修改；不会把 Key 发送到其他服务。
-不同模型只接收自身配置的参数，DeepSeek 的 thinking 参数不会照搬给其他服务。
-账户是否支持这些模型、第三方 Grok 接口及远端参数仍须实际调用验证，本次测试不产生真实 API 费用。
+裁判配置在 `configs/judges.yaml`，Agent 配置在 `configs/deepseek.yaml`。旧版 DeepSeek、GLM、Qwen、Grok 四裁判组合已由以上三裁判替代；DeepSeek 仍是答题模型。
 
-## 4. 处理条数与单独评分
+Qwen 需要真实 WorkspaceId，程序根据 `qwen_workspace_id` 构造：
 
-`max_samples: null` 是 Python 的 None，处理全部；改成 `521` 则处理原始顺序前 521 条。
-无效条目也占原始位置，不跳过后从尾部补齐。每条 T3 的全部轮次、T4 协作仍完整运行。
-命令行可以覆盖设置：
-
-```bash
-python run.py --max-samples 521
-python run.py --max-samples None
-python run.py --input /其他路径/dataset.json
+```text
+https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 ```
 
-JSON 顶层必须是完整数组，不接受聊天文本中的 HTML 转义或多余反斜杠。
-读取和校验不修改输入。`split` 字段可保留但不影响运行。
-选中的范围保存到 manifest，后续评分使用相同范围，不会把未运行尾部当作失败答卷。
+WorkspaceId 不是 API Key，程序不能从 Key 推断。若已有完整接口地址，填写 `qwen_base_url` 并将 `qwen_workspace_id` 留空，两者不能同时填。MiniMax 与 Gemini 可以用同一个网关 Key，但该 Key 必须分别有相应模型权限。
 
-只答题、暂不付费评分：
+模型名按配置原样发送，不静默替换。APIKEY.FAN 文档确认 OpenAI Chat Completions 使用 `/v1/chat/completions`；本次未使用真实凭据确认上述两个精确模型别名的账号可用性。网络、余额、模型权限及远端参数兼容性仍需在用户环境实际运行确认。各模型只接收自身参数，不照搬 DeepSeek 的 `thinking` 参数。
+
+接口依据：[APIKEY.FAN 接入文档](https://apikey.fan/docs/api-scripts)、[百炼接口地址](https://help.aliyun.com/en/model-studio/base-url)、[Qwen3.8-Flash 模型说明](https://help.aliyun.com/en/model-studio/qwen3-8-flash)、[Qwen 结构化输出](https://help.aliyun.com/en/model-studio/qwen-structured-output)。
+
+## 多文件、条数、输出与恢复
+
+`inputs` 中各文件独立运行、独立评分。`--max-samples 4` 表示**每个文件**各取原始顺序前 4 条；无效条目也占原位置，不从后面补齐。不会把多个文件合并后共同截取，也不会把未选中的尾部当作失败答卷。
+
+`run_dir: null` 自动创建并打印输出位置。单文件时可以指定一个运行目录；多文件时该路径作为输出根目录，各文件写入独立子目录。恢复时可指定单个运行目录，也可指定多文件运行的根目录。
 
 ```bash
-python run.py --no-judge
+# 指定本次输出位置
+python run.py --settings settings.local.yaml --max-samples 4 --run-dir runs/trial_001
+
+# 只运行 Agent，暂不调用三个裁判
+python run.py --settings settings.local.yaml --max-samples 4 --no-judge
+
+# 已有预测只评分，不重新答题
+python run.py --settings settings.local.yaml --evaluate-only --run-dir runs/trial_001
+
+# 恢复已有答题状态，随后继续评分
+python run.py --settings settings.local.yaml --resume --run-dir runs/trial_001
 ```
 
-已有运行只做四模型评测，不重新生成预测：
+恢复和单独评分沿用原运行输入与已选范围，不能通过重新设置条数扩大旧实验。保持原始输入、Agent 配置、提示词和代码一致；指纹变化时拒绝混合续跑。修改模型或评分规则的实验使用新目录。
 
-```bash
-python run.py --evaluate-only --run-dir runs/你的输出目录
+已完成裁判响应从缓存复用。遗留 `STARTED` 请求代表远端结果不确定，默认暂停；显式 `--retry-uncertain-judges` 才重试裁判，`--retry-uncertain` 才重试答题，两者都可能重复计费。程序不承诺远端 API 的 exactly-once。
+
+## Agent 实际流程
+
+控制器按当前证据缺口选择读取、检索、提出主张、范围比较和提交。提交前由支持核对阶段检查证据，未提交候选不进入最终主张。检索使用字符二元组 Jaccard，只负责召回，不按关键词猜立场。
+
+T1 提取指定范围评价；T2 整合独立片段并解释关系；T3 随证据公开维护累计主张；T4 通过 archivist 与 interpreter 的真实消息交换完成任务。程序分别限制未来证据和角色私有材料。Gold 仅进入独立评分，不反馈给答题 Agent。SQLite 用于运行状态和恢复，不是跨评论的语义长期记忆。
+
+## 可选：本地或训练后的 Qwen
+
+默认保持 DeepSeek。需要比较小模型时，可另建 Agent 配置，例如 `configs/qwen-local.yaml`：
+
+```yaml
+provider:
+  kind: openai
+  model: Qwen/Qwen3-1.7B
+  base_url: http://127.0.0.1:8000/v1
+  api_key_env: null
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+evaluation:
+  semantic_alignment: llm
+  enable_paid_judge: true
+  judges_config: judges.yaml
 ```
 
-该命令使用本地设置的 input 作为 gold，必须与原运行输入文件一致。
-已完成裁判响应会从缓存复用；失败裁判可以在修正 Key 后重试，其余已完成的结果保留。
-更改模型、评分规则或已经评分的预测时，程序拒绝混用旧缓存，请使用新的实验目录。
-裁判也不能把看到的 gold 回传给答题 Agent。
+在 `settings.local.yaml` 将 `agent_config` 指向该文件。需提前启动 OpenAI Chat Completions 本地服务，`model` 必须与服务注册的模型 ID 一致。`chat_template_kwargs` 需服务端支持；程序不会自动启动服务、下载权重或训练。无认证只允许本机回环接口。
 
-## 5. 指标、四裁判均值与综合分
+还可保留 `provider` 为 DeepSeek，只在 `stage_providers.ACTION` 配置上述本地 provider：决策用 Qwen、支持核对和范围比较仍用 DeepSeek。阶段名称为 `ACTION`、`SUPPORT_CHECK`、`SCOPE_COMPARE`。这种混合配置须作为独立实验报告，不能称为全部由小模型完成。
 
-每位裁判独立判断一对一语义等价；依据命题、对象、范围、阶段、条件、声音与不确定性。
-aspect/stance 和证据标签不作为等价配对的前提，程序在配对后独立计算这些指标。
-T3 逐轮对齐并评价最终状态；T2 另评关系解释；T4 另评回答是否实质依赖双方材料。
-证据集合 F1、合法投递、权限和引用指标由程序计算一次，不交给模型投票。
+远端自定义答题服务需认证时，在 provider 设置 `api_key_env: SCOPECRIT_ACTOR_API_KEY`，在本地文件填写 `api_keys.actor`。这是程序内部字段名，用户仍无需设置环境变量。三个裁判不随答题模型切换。
 
-**先各自对齐并计算指标，再平均同一指标。** 比如四位裁判的方面 F1 为 0.8、0.9、0.7、0.8，均值是 0.8。
-报表提供每位裁判分数、正式 mean、可用 available_mean、完整裁判数、标准差和范围。
-正式 mean 要求全部预定裁判对该指标所需目标完整评分。
-请求失败、无法判断、不完整覆盖保留为 null；不能把三个裁判的平均冒充四裁判平均。
-没有实际分母的指标也可能为 null，这与请求失败不同，可查看原始计数与裁判状态。
+## 评分规则与报表
 
-所有质量指标原本在 0–1，不做依赖当前实验样本的 min–max 归一化。
-新增的综合分是**明确约定的展示指标，不是原技术文档中的标准指标**：
+每位裁判独立完成主张的一对一语义对齐，依据命题、对象、范围、阶段、条件、声音和不确定性。配对不预先要求 aspect、stance 或证据相同，避免循环定义。T2 另评关系解释，T3 逐轮评累计记忆，T4 评联合答案是否实质依赖双方材料。证据集合、引用合法性、真实投递和权限由程序核验。
 
-| 综合分 | 固定定义 |
+先按每位裁判的对齐分别计算指标，再平均**相同指标**。正式 `mean` 要求三位预定裁判对该指标完整有效评分；失败、无法判断和不完整覆盖为 `null`，另列 `available_mean`、有效裁判数、标准差与范围。两位的可用均值不能称为三裁判均值。无分母指标也可能为 `null`，应结合原始计数判断。
+
+| 任务 | 原始指标 | 可选展示综合分 |
+|---|---|---|
+| T1 | Aspect Micro-F1、Stance Macro-F1、Evidence F1 | 三项等权平均 |
+| T2 | Claim Coverage、Claim Micro-F1、关系解释、Evidence F1 | 主张 F1、关系解释、证据 F1 等权平均 |
+| T3 | 逐轮及最终轮 Memory State F1、False Overwrite | 全部预期轮次 Memory F1 平均 |
+| T4 | Task Success、Expected Exchange Recall | 语义 Task Success rate |
+
+关系解释 `correct=1`、`partial=0.5`、`incorrect=0`，未评分保持缺失。四任务综合分均有效时，整体分为四者等权宏平均。综合分是额外约定的展示指标，不替代原始指标；不依赖当前实验做 min–max 归一化。False Overwrite、交换召回、权限诊断、调用数、token、耗时单列，不重复混入综合分。不计算 Attribution Accuracy。
+
+各数据文件独立输出：
+
+| 文件 | 用途 |
 |---|---|
-| T1 | 方面 Micro-F1、立场 Macro-F1、证据 F1 等权平均 |
-| T2 | 主张 Micro-F1、关系解释质量、证据 F1 等权平均 |
-| T3 | 全部预期轮次 Memory F1 的平均；另保留最终轮 Memory F1 |
-| T4 | 语义 Task Success rate，避免重复计算其组成条件 |
-| 整体 | 四任务综合分等权宏平均；四个任务都有效才给正式整体分 |
+| `judge_summary.json` | 三裁判指标、均值、完整性、任务分与整体分 |
+| `metrics_summary.csv` | 各任务和整体完整指标表 |
+| `per_sample_metrics.csv` | 逐样本指标，T3 含逐轮结果 |
+| `report.md` | 可读结果与评分规则 |
+| `judges/results.json` | 裁判状态、失败原因及用量 |
+| `judges/<名称哈希>/alignment.json`、`metrics.json` | 各裁判配对及原始指标 |
+| `judges/state.sqlite3` | 独立评分缓存和断点 |
+| `predictions.jsonl` | 答案、主张、证据、T3 快照、T4 消息 |
+| `traces.jsonl`、`messages.jsonl` | 实际动作与协作通信 |
+| `state.sqlite3`、`progress.json` | 答题恢复状态 |
+| `input_validation.json`、`failures.jsonl` | 输入校验和失败隔离 |
+| `metrics.json` | 原始程序评测；多裁判汇总看 `judge_summary.json` |
 
-T2 主张 F1 包含多报惩罚，同时保留原有 Claim Coverage；关系解释 correct=1、partial=0.5、incorrect=0，unscored=null。
-T3 False Overwrite、T4 Exchange Recall 作为独立诊断项，不重复混入综合分。
-费用、调用数、token、耗时、评分覆盖率不混进质量平均。
-实际越权交付、未来/私有引用及不存在 ID 的引用单独报告；T4 的成功判定包含权限条件。
-自动模型评分不是人工金标准。论文分析仍应展示原始指标及裁判分歧，不能只展示总分。
+详细定义见 [评测方法说明.md](评测方法说明.md)。自动模型评分不等同于人工金标准；论文应记录实际模型 ID、接口、参数、评分覆盖率和裁判分歧。
 
-## 6. 每个数据集的输出文件
-
-每个输入数据集使用独立输出目录，报表带数据集名称，保留逐样本、逐任务与整体结果。
-
-| 文件 | 内容 |
-|---|---|
-| `judge_summary.json` | 四裁判全部指标、正式均值、可用均值、标准差、任务分与整体分 |
-| `metrics_summary.csv` | 数据集与各任务所有质量指标；每位裁判各一列，均值与完整性另列 |
-| `per_sample_metrics.csv` | 每条样本指标与均值，T3 额外有逐轮行 |
-| `report.md` | 可读的完整指标表、综合分和评分规则 |
-| `judges/results.json` | 各裁判状态、失败原因、输出目录、调用和 token 统计 |
-| `judges/<名称哈希>/alignment.json` | 对应裁判的一对一语义配对 |
-| `judges/<名称哈希>/metrics.json` | 对应裁判原始完整指标 |
-| `judges/<名称哈希>/calls.jsonl` | 脱敏调用记录，不包含 Key 或隐藏思维链 |
-| `judges/state.sqlite3` | 独立评分缓存，保留每次尝试和断点 |
-| `metrics.json` | 程序原始结构评测，保持旧格式；四模型结果请看 judge_summary.json |
-| `predictions.jsonl` | 答案、已提交主张、证据、T3 快照、T4 消息和答题用量 |
-| `traces.jsonl / messages.jsonl` | 答题动作及真实协作通信 |
-| `state.sqlite3 / progress.json` | 答题状态、恢复进度及样本状态 |
-| `input_validation.json / failures.jsonl` | 输入问题、任务失败和隔离记录 |
-
-日志会打印当前样本、角色、动作、模型阶段及裁判进度。
-语义错误、网络错误、输入错误和未评分分别保留；失败样本不会悄悄从总数中删掉。
-旧的人工对齐入口仍可作为可选兼容功能，但全自动模式不需要人工标注。
-
-## 7. 无网络验收与故障恢复
+## 离线检查与限制
 
 ```bash
 python -m pytest -q
@@ -175,31 +165,8 @@ python run.py --input examples/merged_demo.json --config configs/mock.yaml --run
 python -m scopecrit inspect --run-dir runs/demo
 ```
 
-演示为明确标记的 SYNTHETIC 人工 fixture，Mock 使用预设响应，不从 gold 生成预测。
-四服务 SDK 的测试使用本地 HTTP 模拟，不访问网络，不收费；演示分数不代表模型文学能力。
+离线演示是明确标记的 `SYNTHETIC` fixture，Mock 使用预设响应，不从 gold 生成预测。本地 HTTP 模拟检验适配和流程，不证明真实账号可用或模型文学能力。具体检查边界见 [VALIDATION.md](VALIDATION.md)。
 
-如果使用了本地配置，可以用程序接口恢复答题；本地配置仅由 run.py 加载：
-先用 `python run.py --evaluate-only --run-dir ...` 恢复评分；需要恢复答题时见下方 Python 调用或继续使用已有环境凭证的 CLI。
+输入必须是 JSON 数组；条目按 schema 校验，问题记录保留，不静默改写数据。退出码 `0` 为请求流程完整完成，`1` 为部分、失败或未完整评分，`2` 为配置或输入错误。429、连接错误与部分 5xx 有限重试，400/401/403/404/422 不盲重试。未调用真实 API 前，不能承诺端到端没有 bug。
 
-```python
-from scopecrit.cli import main
-from scopecrit.local_settings import configured_api, load_local_settings
-with configured_api(load_local_settings("settings.local.yaml")):
-    main(["resume", "--run-dir", "runs/你的输出目录"])
-```
-
-遗留 STARTED 裁判请求默认暂停，只有显式 `--retry-uncertain-judges` 才重试，可能重复计费。
-答题阶段的不确定调用对应 `resume --retry-uncertain`。系统不承诺远端 API 的 exactly-once。
-429、连接错误与部分 5xx 受限重试；400/401/403 不盲重试。裁判错误不会改写预测。
-退出码：0 为请求的流程完整完成；1 为存在部分/失败/未完整评分；2 为配置或输入错误。
-原有运行的输入/代码/提示词指纹变化时拒绝直接续跑，避免混合实验。
-
-当前训练文件中 CritPred48:T1–T4 证据编号不连续，严格校验会隔离这四条，原数据不自动改写。
-首版文档未包含后续用户要求的四模型评分，本 README 和代码记录当前扩展；原 Word 文件保持不变。
-
-## 8. 阅读代码
-
-`run.py` → `local_settings.py`（本地配置）→ `cli.py`（工作流）→ `engine.py`（T1–T4）→
-`judging.py`（独立对齐）→ `reporting.py`（平均与报表）。
-`judge_config.py / judge_providers.py` 分别负责四服务配置与 SDK 参数，`evaluation.py` 保留确定性指标计算。
-`storage.py` 负责答题事务，裁判另用独立缓存；SQLite 不是跨任务语义长期记忆。
+代码入口为 `run.py` → `local_settings.py` → `cli.py` → `engine.py`；评分由 `judging.py`、`judge_providers.py`、`reporting.py` 和 `evaluation.py` 完成。

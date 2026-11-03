@@ -220,9 +220,12 @@ class Engine:
         ids = args["claim_ids"] if args is not None else list(role["committed"])
         claims = [role["committed"][cid] for cid in ids]
         evidence_ids = sorted({eid for c in claims for eid in c["evidence_ids"]})
+        # 未产生主张的暂停不能仅靠程序标记变成一份非空答卷。
+        # 真正失败仍由状态计零；已有提交的部分答案继续明确标记来源。
         answer = (args["answer"] if args is not None else
-                  "【部分结果：程序汇总已有提交，非正常模型完成】\n" +
-                  "\n".join(c["text"] + ''.join(f'[{eid}]' for eid in c["evidence_ids"]) for c in claims))
+                  ("【部分结果：程序汇总已有提交，非正常模型完成】\n" +
+                   "\n".join(c["text"] + ''.join(f'[{eid}]' for eid in c["evidence_ids"]) for c in claims)
+                   if claims else ""))
         relation_ids = args["relation_ids"] if args is not None else list(role["relations"])
         return {"claims": deepcopy(claims), "answer": answer, "evidence_ids": evidence_ids,
                 "relations": [deepcopy(role["relations"][rid]) for rid in relation_ids],
@@ -478,3 +481,4 @@ class Engine:
             if s["status"] == "RUNNING" and s["invalid_streak"] >= limits["max_consecutive_invalid_actions"]:
                 self.stop("CONSECUTIVE_INVALID_ACTIONS")
         return self.envelope()
+

@@ -1,25 +1,47 @@
-# 本次交付验证
+# 验证范围与交付限制
 
-- Python 3.12.14；依赖已实际安装，`pip check` 无冲突。
-- `python -m pytest -q`：**189 passed**。
-- `validate / run / export / inspect / resume / evaluate` 均通过离线验收。
-- 人工合成演示：T1–T4 四条全部 COMPLETED，共 35 次 Mock 调用，T4 两条消息实际投递。
-- 无语义对齐时，语义指标为 null；提供演示人工对齐后，各任务预期指标通过。
-- 已验证已完成运行续跑不新增调用；调用响应复用、提交事务恢复、遗留调用暂停及显式重试均有测试。
-- 已验证 gold、未来材料、同伴私有资料及额外证据元数据的请求隔离。
-- 真实 `CritPred_test.json`：372 条输入校验通过。
-- 真实 `CritPred_train.json`：813 条中四条 CritPred48:T1–T4 的证据编号不连续，按规范隔离。
-- 原始数据与技术文档未修改。
-- `max_samples=None / 521`、命令行覆盖、先截取后校验、所选范围的恢复与评分均有回归测试。
-- 直接运行 `run.py` 不要求安装 editable 项目；默认 DeepSeek 配置和自动输出目录已验证。
-- 使用真实 OpenAI SDK 配合本地 HTTP 模拟，验证只填写 JSON 路径和 Key 即可衔接 T1–T4 的全部 35 次请求；没有真实付费调用。
-- API 400/401/403 首次失败停止批次并返回非零退出码；测试验证不会对整批重复无效调用。
-- 四裁判分别对齐、相同指标均值、缺失裁判保留 null、逐任务与逐样本 CSV、四任务宏平均均通过回归测试。
-- 四家真实 SDK 通过本地 HTTP 模拟联调；四条 T1–T4 样本包含 35 次答题调用和 16 次独立裁判调用。
-- GLM 单独持不同配对时，四裁判方面 F1 均值正确为 0.875；认证失败时正式均值为 null，另列三个可用裁判均值。
-- 直接在 settings.local.yaml 填写 Key，无需设置环境变量；Qwen 华北业务空间 ID 自动生成北京地址。
-- 裁判响应缓存可复用，已完成评分不会重复请求；未知调用默认暂停，缺少配置不会启动付费答题。
+本次检查针对现有 ScopeCrit T1–T4 执行和评分，并按最新要求调整为 DeepSeek 答题、Qwen/MiniMax/Gemini 三裁判。首版技术方案中“不默认额外调用模型”的评测约定，由用户后续明确要求的裁判流程扩展；`--no-judge` 仍保留纯答题与程序指标模式。
 
-**未验证：四家真实 API、账户模型/参数兼容性、第三方 Grok 服务路径、模型文学理解和真实数据上的预测质量。**
-本次未调用付费 API、未发布云环境、未把 Mock 演示分数当作实验结论。
-Conda 与清华镜像命令是便捷配置说明，本次实际使用 venv 和默认 Python 软件源安装。
+## 可复现检查命令
+
+```bash
+python -m pytest -q
+python run.py --input examples/merged_demo.json --config configs/mock.yaml --run-dir runs/demo --no-judge
+python -m scopecrit inspect --run-dir runs/demo
+```
+
+2026-11-03 本次实测：`238 passed`（Python 3.12，按 `requirements-lock.txt` 安装，并以 editable 方式安装项目）。`pip check` 无依赖冲突。命令行 Mock 演示 T1–T4 均为 `COMPLETED`。
+
+真实 OpenAI SDK 配合 `httpx.MockTransport` 验证了 DeepSeek 与本地 Qwen 两种答题后端的完整流程：每种后端处理四个演示任务，各发生 35 次答题阶段请求与 12 次三裁判请求。双文件测试验证独立缓存与同名样本隔离。这些是模拟响应的工程验证，不是模型实测成绩。
+
+修复了尚无主张时的中断状态被误计为证据答卷、Windows UTF-8 BOM 输入读取不一致，以及后续文件的非法 JSON 常量未在批次开始前被拒绝的问题。评分前检查原状态库，缺失时不创建空库；模型不存在、认证失败和无效参数会停止对应裁判批次。
+
+## 检查项目
+
+| 范围 | 应验证行为 |
+|---|---|
+| 数据输入 | 一个或多个 JSON 数组；非法条目隔离；重复 ID 与 Unicode 证据偏移 |
+| 条数控制 | null/None 为全部；正整数每文件按原顺序截取；不补齐非法条目；T3 轮次完整 |
+| 本地配置 | Key 直接填私有 YAML；绝对路径与配置相对路径；凭据不进入报表和清单 |
+| T1/T2 | 候选经支持核对提交；不同范围可共存；T2 跨片段关系解释 |
+| T3 | 新证据逐轮公开；累计记忆；未来材料不进入未授权请求 |
+| T4 | 初始资料隔离；实际消息投递；幂等；双方资料依赖 |
+| 恢复 | 响应复用；提交与通信恢复；未知请求暂停；继承原范围；拒绝指纹变化 |
+| 三裁判 | 独立一对一对齐；配对后计算；三裁判完整才给正式均值；缺失为 null |
+| 报表 | 每文件独立；逐样本、逐任务及整体指标和覆盖率；保留原始指标 |
+| 适配器 | 参数隔离；本地 OpenAI 兼容模型；可选按阶段指定 provider |
+| 失败处理 | 400/401/403/404/422 不盲重试；网络/格式失败保留；非零退出码表示未完成 |
+
+测试使用预设的 SYNTHETIC fixture 和本地 HTTP 模拟。Mock 不读取 gold 生成预测；Gold 只进入评分。请求隔离检查应覆盖所有阶段，不能只检查最终答案。
+
+## 已确认的外部接口资料
+
+- [APIKEY.FAN 接入文档](https://apikey.fan/docs/api-scripts)说明 Chat Completions 路径为 `/v1/chat/completions`，SDK 基址为 `https://api.apikey.fan/v1`，使用 Bearer API Key。
+- [百炼接口地址](https://help.aliyun.com/en/model-studio/base-url)确认北京业务空间基址包含 WorkspaceId 和 `/compatible-mode/v1`。
+- [Qwen3.8-Flash 官方说明](https://help.aliyun.com/en/model-studio/qwen3-8-flash)确认模型 ID；[结构化输出说明](https://help.aliyun.com/en/model-studio/qwen-structured-output)列出 JSON 输出能力。
+
+## 尚未证明的内容
+
+本次未进行真实付费调用，未核实用户账号的网络、余额、配额、权限、实际费用或服务稳定性。APIKEY.FAN 中 `minimax-m3.1-flash`、`gemini-3.1-flash-lite` 两个精确文本模型别名按用户要求保留，其账号可用性没有通过公开目录或真实请求确认；程序不会自动换成其他模型。
+
+本地 HTTP 模拟可以证明适配、缓存、恢复和指标路径符合测试条件，不能证明文学理解、模型裁判可靠性或任意真实接口都能运行。未宣称代码不存在任何 bug，未把 Mock 分数或 SDK 测试当作论文实验结果。数据语义质量不由结构校验自动证明。

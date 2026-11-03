@@ -1,24 +1,12 @@
-# 四个模型分别对齐，再平均同一指标。不要在本文件填写真实 Key。
-# 用户示例的 Qwen/GLM model 参数与标题不一致，此处按明确要求的模型配置，绝不静默替换。
+# 三个独立评分裁判；答题 Agent 的 DeepSeek-flash 在 deepseek.yaml 中单独配置。
+# 真实 Key、Qwen 业务空间地址和网关覆盖地址在 settings.local.yaml 中填写。
+# 本文件通过内部变量名接收本地设置，不要求用户设置环境变量。
 enabled: true
 fixture: false
 max_api_retries: 2
 max_format_repairs: 1
 max_input_chars: 120000
 judges:
-  - name: deepseek-flash
-    provider: openai
-    model: deepseek-flash
-    base_url: https://api.deepseek.com
-    api_key_env: DEEPSEEK_API_KEY
-    reasoning_effort: high
-    thinking_enabled: true
-    response_format_json: true
-  - name: GLM-4.5-Air
-    provider: zai
-    model: glm-4.5-air
-    api_key_env: ZHIPU_API_KEY
-    temperature: 0.0
   - name: qwen3.8-flash
     provider: openai
     model: qwen3.8-flash
@@ -27,11 +15,25 @@ judges:
     base_url_env: DASHSCOPE_BASE_URL
     api_key_env: DASHSCOPE_API_KEY
     temperature: 0.0
-  - name: grok-build-0.1
+    # Qwen 自有参数；不使用 DeepSeek 的 thinking.type 结构。
+    enable_thinking: false
+    response_format_json: false
+  - name: minimax-m3.1-flash
     provider: openai
-    model: grok-build-0.1
-    # 用户指定服务；/v1 是 OpenAI 兼容接口约定，实际可用路径需以该服务为准。
+    model: minimax-m3.1-flash
+    # 用户指定网关；模型名和可用性以网关账号实际权限为准，不静默替换模型。
     base_url: https://api.apikey.fan/v1
-    base_url_env: GROK_BASE_URL  # 本地设置提供时优先；未提供时使用上方默认地址。
-    api_key_env: GROK_API_KEY
+    base_url_env: MINIMAX_BASE_URL
+    api_key_env: MINIMAX_API_KEY
+    # 未确认该别名的温度取值范围，沿用服务默认值，避免强制传 0 被拒绝。
+    # 未确认网关支持 response_format；由评分提示要求 JSON，再执行解析和修复。
+    response_format_json: false
+  - name: gemini-3.1-flash-lite
+    provider: openai
+    model: gemini-3.1-flash-lite
+    base_url: https://api.apikey.fan/v1
+    base_url_env: GEMINI_BASE_URL
+    api_key_env: GEMINI_API_KEY
     temperature: 0.0
+    response_format_json: false
+
