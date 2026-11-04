@@ -42,7 +42,11 @@ def _strict_constant(value):
 
 
 def _claim(value):
-    return Claim.model_validate({k: value[k] for k in CLAIM_FIELDS}).model_dump()
+    claim = Claim.model_validate({k: value[k] for k in CLAIM_FIELDS}).model_dump()
+    # Engine.PROPOSE canonicalizes citations before computing its fingerprint.
+    # Use the identical set ordering for teacher lookup; source JSON is unchanged.
+    claim["evidence_ids"] = sorted(set(claim["evidence_ids"]))
+    return claim
 
 
 def _action(name, arguments, reason="依据当前可见材料执行此操作"):
@@ -173,6 +177,9 @@ class _TeacherEngine(Engine):
 
     def _teacher_action(self):
         s, role, sample = self.state, self.role, self.sample
+        previous = role.get("last_tool_result")
+        if previous and previous.get("ok") is False:
+            raise ValueError(f"{sample['sample_id']}: 教师工具动作失败，停止生成而非重复动作：{previous}")
         if sample["task"] == "T4":
             # Fulfil annotated exchanges, plus deliver all answer evidence to
             # interpreter. Never reveal them to the recipient before activation.

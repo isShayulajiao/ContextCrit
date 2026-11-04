@@ -40,6 +40,25 @@ class TrainingDataTests(unittest.TestCase):
         self.assertTrue(any(r["metadata"]["action"] == "COMPARE" for r in by_task["T2"]))
         self.assertTrue(any(r["metadata"]["action"] == "SEND_EVIDENCE" for r in by_task["T4"]))
 
+    def test_unsorted_citations_match_engine_candidate_fingerprint(self):
+        sample = self.fixture()[1]
+        sample["gold"]["claims"][0]["evidence_ids"] = ["E002", "E001"]
+        original = deepcopy(sample)
+        records = load_records(self.write([sample]))
+        self.assertEqual(sample, original)
+        proposals = [json.loads(r["chosen"]) for r in records if r["metadata"]["action"] == "PROPOSE"]
+        self.assertEqual(len(proposals), len(sample["gold"]["claims"]))
+        self.assertEqual(proposals[0]["arguments"]["claims"][0]["evidence_ids"], ["E001", "E002"])
+        self.assertEqual(records[-1]["metadata"]["action"], "FINALIZE")
+
+    def test_teacher_tool_failure_is_reported_before_retry_loop(self):
+        from ScopeSFT.data import _TeacherEngine
+        engine = _TeacherEngine(self.fixture()[0])
+        engine.initialize()
+        engine.role["last_tool_result"] = {"ok": False, "error_code": "INVALID_ARGUMENTS", "message": "test failure"}
+        with self.assertRaisesRegex(ValueError, "test failure"):
+            engine._teacher_action()
+
     def test_t2_reference_answer_never_leaks_through_comparison_observation(self):
         sample = self.fixture()[1]
         sentinel = "仅限最终教师目标的唯一答案哨兵"
