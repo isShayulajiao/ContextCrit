@@ -2,10 +2,43 @@
 from __future__ import annotations
 
 
-def encode_record(tokenizer, record, max_length):
-    prompt = tokenizer.apply_chat_template(record["messages"], tokenize=False,
+NON_THINKING_SUFFIX = "<think>\n\n</think>\n\n"
+ASSISTANT_PREFIX = "<|im_start|>assistant\n"
+
+
+def configure_tokenizer(tokenizer):
+    """Keep the checkpoint's EOS/pad vocabulary and require reliable offsets."""
+    if not tokenizer.is_fast or not tokenizer.chat_template:
+        raise ValueError("需要具有官方 chat_template 与 offset mapping 的 Qwen fast tokenizer")
+    if tokenizer.eos_token_id is None:
+        raise ValueError("tokenizer 没有 EOS")
+    # Qwen3.5 uses <|endoftext|> for padding and <|im_end|> for chat EOS.
+    # Preserve those distinct official tokens when they are present.
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
+    return tokenizer
+
+
+def render_prompt(tokenizer, messages):
+    """Use the checkpoint template's explicit text-only, non-thinking branch."""
+    if any(not isinstance(message.get("content"), str) for message in messages):
+        raise ValueError("此训练入口只接受纯文本 message.content，不接受图片或视频")
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False,
                                            add_generation_prompt=True, enable_thinking=False)
+    # Qwen3/Qwen3.5 hybrid checkpoints close an empty thinking block here.
+    # Qwen3 Instruct-2507 is non-thinking-only and ends at the assistant header.
+    # Accept those two complete headers, never an arbitrary/open thinking suffix.
+    if not prompt.endswith((ASSISTANT_PREFIX, ASSISTANT_PREFIX + NON_THINKING_SUFFIX)):
+        raise ValueError("chat_template 未生成 Qwen 非思考模式前缀；请使用官方 Qwen3 / Qwen3.5 tokenizer")
+    return prompt
+
+
+def encode_record(tokenizer, record, max_length):
+    prompt = render_prompt(tokenizer, record["messages"])
     prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
+    # Encode the response separately so offsets remain relative to the original
+    # chosen/rejected JSON, rather than to a rendered or trimmed chat transcript.
     chosen = tokenizer(record["chosen"], add_special_tokens=False, return_offsets_mapping=True)
     response_ids = chosen["input_ids"]
     if not response_ids or tokenizer.eos_token_id is None:

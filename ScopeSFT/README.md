@@ -1,8 +1,10 @@
-# ScopeSFT：Qwen3-1.7B 的 LoRA 监督训练
+# ScopeSFT：Qwen3 / Qwen3.5 的 LoRA 监督训练
 
 直接读取 CultCrit 的 JSON 数组，不要求手动制作 messages。T1–T4 的 gold 主张、参考答案、逐轮记忆和通信标签会通过现有 ScopeCrit 引擎转换为合法的 ACTION 教师轨迹，再进行 **response-only causal NLL + LoRA** 训练。输入提示不包含 gold 字段；标签只用于生成教师动作。训练仅更新 ACTION 策略，不训练 SUPPORT_CHECK / SCOPE_COMPARE 模型。
 
-`ScopeSFT` 与 `ScopeCT` 共用基础设施，请保留完整仓库。两个实验分别从 **`Qwen/Qwen3-1.7B` 原始 checkpoint** 开始，使用相同正例、随机种子和预算。这里“base 模型”指实验起点；官方模型 ID 就是 `Qwen/Qwen3-1.7B`，并非另一个名为 `*-Base` 的模型。提示使用 `enable_thinking=False`。
+`ScopeSFT` 与 `ScopeCT` 共用基础设施，请保留完整仓库。支持原有 **Qwen3** 和 **Qwen3.5-2B**；通过 `--model` 指定官方模型 ID 或本地目录。两套实验必须分别从同一个原始 checkpoint 开始，使用相同正例、随机种子和预算。默认模型仍为 `Qwen/Qwen3-1.7B`，显式传入 Qwen3.5 路径即可切换。提示均使用官方聊天模板的 `enable_thinking=False`。
+
+Qwen3.5 使用官方原生文本 CausalLM 组件训练，不加载视觉编码器。LoRA 覆盖常规注意力、线性注意力和 MLP 的实际投影模块；SFT 损失定义保持不变。此适配需要下述新环境，不能继续使用原来的 Transformers 4.51.3 环境。
 
 ## 安装一次
 
@@ -11,14 +13,18 @@ Linux、Python 3.10–3.12（推荐 3.11）、可访问 PyTorch/PyPI/Hugging Fac
 ```bash
 cd /你的路径/CultCrit-Bench
 bash ScopeSFT/install.sh
-source ~/.venvs/scope-qwen3/bin/activate
+source ~/.venvs/scope-qwen35/bin/activate
 ```
 
-脚本创建独立虚拟环境，安装 PyTorch **2.5.1 CUDA 11.8**、Transformers **4.51.3**、PEFT **0.15.2**、Accelerate **1.6.0**。无需另装系统 CUDA Toolkit。若需要指定虚拟环境目录：`bash ScopeSFT/install.sh /绝对路径/venv`。首次运行会下载公开的官方模型，通常无需 HF token；离线机器可用 `--model /绝对路径/本地Qwen3模型`。
+脚本创建独立虚拟环境，安装 PyTorch **2.5.1 CUDA 11.8**、Transformers **5.3.0**、PEFT **0.18.1**、Accelerate **1.12.0**，并运行依赖检查。无需另装系统 CUDA Toolkit。若需要指定虚拟环境目录：`bash ScopeSFT/install.sh /绝对路径/venv`；指定 Python 可用 `SCOPE_PYTHON=/绝对路径/python3.11 bash ScopeSFT/install.sh`。首次运行会下载公开的官方模型；本地已有完整模型时使用 `--model /绝对路径/模型目录`。
 
 ### 四张 TITAN RTX / 驱动 470.182.03
 
-默认 FP16、每卡 batch 1、LoRA rank 16、gradient checkpointing、四进程 DDP；有效 batch 为 `1 × 4卡 × 4累积 = 16` 条 ACTION。四张卡各自保存一份模型，显存不是自动合并成一个 96 GB 设备。禁用 BF16、FlashAttention、量化插件和编译内核。默认 PyTorch SDPA 的非 flash 后端；可通过 `--attention eager` 切换标准注意力。
+默认 GPU FP16、每卡 batch 1、LoRA rank 16、gradient checkpointing、四进程 DDP；有效 batch 为 `1 × 4卡 × 4累积 = 16` 条 ACTION。四张卡各自保存一份模型，显存不是自动合并成一个 96 GB 设备。不要求 BF16、FlashAttention、量化插件、Triton 或额外 Mamba 内核。
+
+默认 `--low-memory auto` 启用训练显存优化：完整因果注意力按 query 分块并重计算，响应 token 的词表投影与损失也分块并重计算，避免一次保存完整长序列的词表 logits 和注意力矩阵。保留全上下文、全部响应监督和原来的逐样本平均损失，不通过滑动窗口、裁短或删除 CT 分歧位置降低显存。完整注意力的总计算量仍随长度快速增长，低显存不代表长序列计算很快。
+
+Qwen3.5 使用原生 PyTorch 线性注意力回退时，对归一化与递推运算禁用 autocast，并用 FP32 计算后将输出转回模型 dtype，避免低幅值/补零输入在 FP16 反向时产生非有限梯度。该保护同时用于标准和低显存训练路径，保持原有公式，不增加训练参数；实际启用情况写入 `training_manifest.json` 的 `numeric_stability`。
 
 `nvidia-smi` 的 CUDA 11.4 是驱动报告的兼容版本，不是 Python 内的 CUDA runtime。470 驱动在 CUDA 11.x 次版本兼容范围内，但仍可能遇到 PTX、新驱动特性或 NCCL 限制。程序在下载权重前执行真实 CUDA FP16 矩阵反向和多卡 NCCL all-reduce；失败时保留具体错误并停止。若确为 driver/PTX 不兼容，需要升级驱动。当前开发环境无这些 GPU，未声称已在该硬件实测成功。
 
@@ -37,6 +43,19 @@ python ScopeSFT/train.py --data /data/train_optimized_validated.json --gpus 02
 python ScopeSFT/train.py --data /data/train_optimized_validated.json --gpus 0,2 --output /data/weights/sft_run1
 ```
 
+用户当前的 Qwen3.5-2B 路径和最长约 3.6 万 token 的数据可这样运行：
+
+```bash
+cd /data/hugang/wkcode/ScopeSFT
+python train.py \
+  --data /data/hugang/wkcode/validation_output/train_optimized_validated.json \
+  --model /data/hugang/wkcode/Qwen3.5-2B \
+  --max-length 65536 \
+  --gpus 0123
+```
+
+这里目录应是更新后的完整仓库中的 `ScopeSFT`；同级 `ScopeCT`、`ScopeCrit` 等依赖目录应保留。训练全部原始任务样本是默认行为，也可显式添加 `--max-samples None`；先检查前 20 条原始任务可添加 `--max-samples 20 --max-steps 2`。`--max-samples` 计数的是输入 JSON 的任务条目，选定条目的全部 ACTION、T3 轮次和 T4 角色轨迹仍会展开，不是只训练 N 个动作；`0` 会报错。
+
 不要再外层套一次 `torchrun`；入口已经自动启动进程。GPU 编号指所选物理设备；`0123` 等价于 `0,1,2,3`，编号大于 9 时使用逗号。输出目录必须是新的或空的，防止覆盖之前的实验。
 
 默认 `3 epochs`、学习率 `2e-4`、rank `16`、梯度累积 `4`、最长序列 `8192`。例如：
@@ -46,7 +65,20 @@ python ScopeSFT/train.py --data /data/train.json --gpus 0123 \
   --epochs 3 --learning-rate 0.0002 --grad-accum 4 --max-length 8192
 ```
 
-序列长度包括协议 schema、合法观察和动作答案。**绝不静默截断正文、未来证据约束或标签**；超长时会报告样本与实际 token 数。可在显存允许时增大 `--max-length`。若显存不足，先保持 batch 1、缩短合法训练材料或调整长度；减小有效 batch 的 `--grad-accum` 不会显著降低单步激活显存。eager 长序列的注意力显存增长很快。
+序列长度包括协议 schema、合法观察和动作答案。`--max-length 65536` 是校验上限，**不会把每条样本填充到 65536**；实际按当前 microbatch 的最长序列动态填充。**绝不静默截断正文、未来证据约束或标签**；超长时会报告样本与实际 token 数。
+
+显存相关参数如下，SFT 与 CT 均可使用：
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `--low-memory` | `auto` | `auto/on` 使用低显存路径；`off` 供标准路径对照 |
+| `--loss-chunk-size` | `128` | 每个词表投影与损失块的响应 token 数 |
+| `--attention-chunk-size` | `128` | 完整因果注意力的 query 块大小 |
+| `--gradient-checkpointing` | `on` | 层级梯度重计算，关闭通常增加显存 |
+| `--dtype` | `auto` | GPU 使用 FP16、CPU 使用 FP32；也可显式指定 |
+| `--batch-size` | `1` | 每卡 microbatch，不等于梯度累积后的有效 batch |
+
+如果仍然 OOM，先保持每卡 batch 1，并将 `--loss-chunk-size 64 --attention-chunk-size 64`，必要时继续降为 32。分块变小增加重计算与调度开销，但不改变训练目标。不要为绕过 OOM 静默裁剪证据或标签；降低 `--grad-accum` 通常也不会显著降低单步激活显存。若全上下文的模型状态或其他激活仍超过单卡容量，程序无法保证通过这些分块参数解决，需依据实际峰值另选显存方案。
 
 ## 数据与检查
 
@@ -95,6 +127,8 @@ python -m pytest -q ScopeSFT ScopeCT
 python -m ScopeSFT.smoke_test
 ```
 
-测试包括精确 token 分歧、response mask、因果位置、损失/梯度、正例 logits 裁剪等价性；烟雾测试使用本地生成的微型 Qwen3，完成真实训练、确认 LoRA 权重更新、合并和重载，并核对合并模型与 adapter 输出一致。还验证了两进程 CPU/Gloo 的训练及导出流程。这些检查不等于 1.7B 四卡训练或下游文学能力验证。
+测试覆盖精确 token 分歧、response mask、因果位置、损失/梯度、动态长度和原始任务条数选择，并增加微型 Qwen3.5 混合注意力的 CPU 校验。低显存实现检查分块前后损失和梯度的一致性，不能用这些数值测试代替真实长序列 GPU 峰值测量。烟雾测试用于检查训练、LoRA 权重更新、合并和重载；最终执行结果以本次交付的验证记录为准。这些检查不等于 Qwen3.5-2B 在四张 TITAN RTX 上的 3.6 万 token 训练验证，也不证明下游文学能力改善。
+
+本次已通过 91 项测试、5 组完整烟雾测试及两进程 Trainer 训练，详细环境与边界见 [Qwen3.5 验证记录](VALIDATION_QWEN35.md)。
 
 用户压缩训练集只抽取前四条 T1–T4 样本检查，得到 58 条合法 ACTION 轨迹，没有逐条读取完整训练集；全量文件的最终检查发生在用户实际运行时。

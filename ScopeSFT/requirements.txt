@@ -1,10 +1,12 @@
-# Install torch==2.5.1 (CUDA 11.8) first using install.sh.
-transformers==4.51.3
-peft==0.15.2
-accelerate==1.6.0
+# install.sh installs the CUDA 11.8 build first; this pin prevents a CUDA upgrade.
+torch==2.5.1
+# Qwen3.5 requires its native model classes (the old 4.51 Qwen3 stack is insufficient).
+transformers==5.3.0
+peft==0.18.1
+accelerate==1.12.0
 numpy==1.26.4
-tokenizers==0.21.4
-huggingface-hub==0.36.2
+tokenizers==0.22.2
+huggingface-hub==1.5.0
 safetensors==0.8.0
 pydantic==2.14.2
 PyYAML==6.0.3

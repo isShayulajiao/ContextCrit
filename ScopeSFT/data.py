@@ -340,20 +340,37 @@ def _iter_json_array(path, chunk_size=65536):
                 raise ValueError("JSON 数组条目之间缺少逗号")
 
 
-def iter_records(path, allow_test_split=False):
-    """Yield positive ACTION examples per source sample with optional pairs.
+def iter_samples(path, allow_test_split=False, max_samples=None, selection=None):
+    """Yield validated original rows, selecting the first ``max_samples`` rows.
 
     The explicit path is the training corpus, including rows marked test. A
     warning prevents presenting scores on those same rows as held-out results.
     ``allow_test_split=True`` acknowledges/suppresses that warning; no row is
     silently discarded, relabelled or split into another corpus.
+
+    Selection precedes ACTION expansion, so a T3 or T4 sample always retains its
+    complete trajectory. Invalid selected rows fail rather than being replaced
+    by later rows. The unselected tail is still decoded to verify JSON syntax
+    and count ``source_total``, without requiring its rows to be training-ready.
+    ``selection``, when supplied, is populated incrementally and is complete only
+    after exhausting this iterator.
     """
+    if max_samples is not None and (isinstance(max_samples, bool)
+                                    or not isinstance(max_samples, int) or max_samples < 1):
+        raise ValueError("max-samples 必须为正整数或 None")
     path = Path(path).expanduser()
     if not path.is_absolute():
         raise ValueError("训练数据路径必须是绝对路径")
+    if selection is None:
+        selection = {}
+    selection.update(max_samples=max_samples, source_total=0, selected_samples=0,
+                     selected_docs=0, selected_tasks={})
     seen, docs = set(), {}
     warned = False
     for i, sample in enumerate(_iter_json_array(path)):
+        selection["source_total"] += 1
+        if max_samples is not None and i >= max_samples:
+            continue
         if not isinstance(sample, dict):
             raise ValueError(f"第 {i + 1} 条样本不是 JSON 对象")
         # Metadata absent from uploaded example is not fabricated in the source.
@@ -382,6 +399,24 @@ def iter_records(path, allow_test_split=False):
         if sample.get("split", "").lower() in ("test", "validation", "valid", "eval", "dev") and not allow_test_split and not warned:
             warnings.warn("提供的训练文件含 test/validation 标记；按明确输入路径用于训练，这些样本不得再作为独立测试集报告。", UserWarning, stacklevel=2)
             warned = True
+        selection["selected_samples"] += 1
+        selection["selected_docs"] = len(docs)
+        tasks = selection["selected_tasks"]
+        tasks[sample["task"]] = tasks.get(sample["task"], 0) + 1
+        yield sample
+
+
+def read_samples(path, allow_test_split=False, max_samples=None, selection=None):
+    """Read selected original rows for small corpora; large runs stream them."""
+    return list(iter_samples(path, allow_test_split=allow_test_split,
+                             max_samples=max_samples, selection=selection))
+
+
+def iter_records(path, allow_test_split=False, max_samples=None, selection=None):
+    """Expand every selected source row into its complete legal ACTION trace."""
+    for sample in iter_samples(path, allow_test_split=allow_test_split,
+                               max_samples=max_samples, selection=selection):
+        sid = sample["sample_id"]
         engine = _TeacherEngine(sample)
         result = engine.run()
         if result["status"] != "COMPLETED" or result["access_violations"]:
@@ -389,6 +424,7 @@ def iter_records(path, allow_test_split=False):
         yield from engine.records
 
 
-def load_records(path, allow_test_split=False):
+def load_records(path, allow_test_split=False, max_samples=None, selection=None):
     """Compatibility wrapper for small corpora; large runs use iter_records."""
-    return list(iter_records(path, allow_test_split=allow_test_split))
+    return list(iter_records(path, allow_test_split=allow_test_split,
+                             max_samples=max_samples, selection=selection))

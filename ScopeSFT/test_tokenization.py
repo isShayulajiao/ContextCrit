@@ -5,16 +5,30 @@ import unittest
 from tokenizers import Tokenizer, models, pre_tokenizers, trainers
 from transformers import PreTrainedTokenizerFast
 
-from ScopeSFT.tokenization import Collator, encode_record
+from ScopeSFT.tokenization import Collator, configure_tokenizer, encode_record, render_prompt
 
 
+# Local text-only fixture follows the official Qwen3.5 user/system rendering and
+# explicit non-thinking generation branch; it does not copy vision/tool handling.
+# https://huggingface.co/Qwen/Qwen3.5-2B/blob/main/chat_template.jinja
 CHAT_TEMPLATE = (
+    "{% for message in messages %}"
+    "{{ '<|im_start|>' + message['role'] + '\\n' + (message['content']|trim) + '<|im_end|>\\n' }}"
+    "{% endfor %}"
+    "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}"
+    "{% if enable_thinking is defined and enable_thinking is true %}{{ '<think>\\n' }}"
+    "{% else %}{{ '<think>\\n\\n</think>\\n\\n' }}{% endif %}"
+    "{% endif %}"
+)
+
+# Official Qwen3-4B-Instruct-2507 has no thinking branch: generation ends at
+# this assistant header. Keep it covered alongside the Qwen3.5 hybrid template.
+# https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/main/tokenizer_config.json
+INSTRUCT_ONLY_CHAT_TEMPLATE = (
     "{% for message in messages %}"
     "{{ '<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>\\n' }}"
     "{% endfor %}"
-    "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}"
-    "{% if not enable_thinking %}{{ '<think>\\n\\n</think>\\n\\n' }}{% endif %}"
-    "{% endif %}"
+    "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
 )
 
 
@@ -22,13 +36,13 @@ def make_tokenizer(texts):
     """A genuine Rust fast tokenizer with offsets, fitted only to local fixtures."""
     backend = Tokenizer(models.WordLevel(unk_token="<|unk|>"))
     backend.pre_tokenizer = pre_tokenizers.Whitespace()
-    specials = ["<|pad|>", "<|unk|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
+    specials = ["<|endoftext|>", "<|unk|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
     backend.train_from_iterator(texts, trainers.WordLevelTrainer(special_tokens=specials, min_frequency=1))
     tokenizer = PreTrainedTokenizerFast(tokenizer_object=backend, unk_token="<|unk|>",
-                                       pad_token="<|pad|>", eos_token="<|im_end|>",
+                                       pad_token="<|endoftext|>", eos_token="<|im_end|>",
                                        additional_special_tokens=["<|im_start|>", "<think>", "</think>"])
     tokenizer.chat_template = CHAT_TEMPLATE
-    return tokenizer
+    return configure_tokenizer(tokenizer)
 
 
 def record(chosen='{"text":"good"}', rejected='{"text":"bad"}'):
@@ -48,7 +62,62 @@ class TokenizationTests(unittest.TestCase):
             'system user assistant Return JSON. Judge visible evidence.',
             '{"text":"good"}', '{"text":"bad"}', '{"text":"good","extra":1}',
             '{"text":"good","reason":"ok"}', '{"reason":"ok","text":"bad"}',
+            '{"说明":"证据","text":"good"}', '{"说明":"证据","text":"bad"}',
         ])
+
+    def test_checkpoint_pad_and_chat_eos_remain_distinct(self):
+        original_pad = self.tokenizer.pad_token_id
+        self.tokenizer.padding_side = "left"
+        configure_tokenizer(self.tokenizer)
+        self.assertEqual(self.tokenizer.pad_token, "<|endoftext|>")
+        self.assertEqual(self.tokenizer.eos_token, "<|im_end|>")
+        self.assertEqual(self.tokenizer.pad_token_id, original_pad)
+        self.assertNotEqual(self.tokenizer.pad_token_id, self.tokenizer.eos_token_id)
+        self.assertEqual(self.tokenizer.padding_side, "right")
+        self.tokenizer.pad_token = None
+        configure_tokenizer(self.tokenizer)
+        self.assertEqual(self.tokenizer.pad_token_id, self.tokenizer.eos_token_id)
+
+    def test_non_thinking_template_must_be_honored_and_content_must_be_text(self):
+        source = record()
+        expected = ("<|im_start|>system\nReturn JSON.<|im_end|>\n"
+                    "<|im_start|>user\nJudge visible evidence.<|im_end|>\n"
+                    "<|im_start|>assistant\n<think>\n\n</think>\n\n")
+        self.assertEqual(render_prompt(self.tokenizer, source["messages"]), expected)
+        source["messages"][1]["content"] = [{"type": "image", "image": "unused.png"}]
+        with self.assertRaisesRegex(ValueError, "纯文本"):
+            encode_record(self.tokenizer, source, 1000)
+        self.tokenizer.chat_template = "{{ 'assistant' }}"
+        with self.assertRaisesRegex(ValueError, "非思考模式"):
+            encode_record(self.tokenizer, record(), 1000)
+        self.tokenizer.chat_template = "{{ '<|im_start|>assistant\\n<think>\\n' }}"
+        with self.assertRaisesRegex(ValueError, "非思考模式"):
+            encode_record(self.tokenizer, record(), 1000)
+
+    def test_instruct_only_qwen3_template_remains_non_thinking(self):
+        self.tokenizer.chat_template = INSTRUCT_ONLY_CHAT_TEMPLATE
+        source = record()
+        prompt = render_prompt(self.tokenizer, source["messages"])
+        self.assertTrue(prompt.endswith("<|im_start|>assistant\n"))
+        self.assertNotIn("<think>", prompt)
+        encoded, audit = encode_record(self.tokenizer, source, 1000)
+        self.assertEqual(audit["pair_status"], "valid")
+        prompt_count = len(self.tokenizer.encode(prompt, add_special_tokens=False))
+        self.assertTrue(all(target == -100 for target in encoded["labels"][:prompt_count]))
+        self.assertEqual(encoded["labels"][prompt_count:-1],
+                         self.tokenizer.encode(source["chosen"], add_special_tokens=False))
+
+    def test_original_response_offsets_survive_unicode_and_whitespace(self):
+        source = record(' \n{"说明":"证据","text":"good"}\n ',
+                        ' \n{"说明":"证据","text":"bad"}\n ')
+        encoded, audit = encode_record(self.tokenizer, source, 1000)
+        self.assertEqual(audit["pair_status"], "valid")
+        chosen = self.tokenizer(source["chosen"], add_special_tokens=False, return_offsets_mapping=True)
+        start, end = chosen["offset_mapping"][audit["response_token_index"]]
+        self.assertEqual(source["chosen"][start:end], "good")
+        response_start = next(i for i, target in enumerate(encoded["labels"]) if target != -100)
+        self.assertEqual(encoded["labels"][response_start:-1], chosen["input_ids"])
+        self.assertEqual(encoded["labels"][-1], self.tokenizer.eos_token_id)
 
     def test_semantic_pair_uses_exact_first_divergence_and_target_index(self):
         source = record()
@@ -142,21 +211,26 @@ class TokenizationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "未截断数据"):
             encode_record(self.tokenizer, source, len(encoded["input_ids"]) - 1)
 
-    def test_prompt_logit_slicing_preserves_full_forward_loss_and_gradients(self):
+    def test_hybrid_model_response_loss_preserves_full_forward_loss_and_gradients(self):
         import torch
-        from transformers import Qwen3Config, Qwen3ForCausalLM
+        from transformers import Qwen3_5TextConfig, Qwen3_5ForCausalLM
         from ScopeCT.objective import scope_loss
         from ScopeSFT.runtime import trainer_class
 
         torch.manual_seed(9)
-        config = Qwen3Config(vocab_size=len(self.tokenizer), hidden_size=16,
-                             intermediate_size=32, num_hidden_layers=1,
-                             num_attention_heads=2, num_key_value_heads=1,
-                             head_dim=8, max_position_embeddings=512,
-                             sliding_window=None, use_sliding_window=False,
-                             attention_dropout=0.0)
+        config = Qwen3_5TextConfig(vocab_size=len(self.tokenizer), hidden_size=16,
+                                  intermediate_size=32, num_hidden_layers=2,
+                                  num_attention_heads=2, num_key_value_heads=1,
+                                  head_dim=8, max_position_embeddings=512,
+                                  linear_num_key_heads=1, linear_num_value_heads=2,
+                                  linear_key_head_dim=8, linear_value_head_dim=8,
+                                  layer_types=["linear_attention", "full_attention"],
+                                  rope_parameters={"rope_type": "default", "rope_theta": 10000.0,
+                                                   "partial_rotary_factor": 0.5,
+                                                   "mrope_section": [1, 1, 0]},
+                                  attention_dropout=0.0)
         config._attn_implementation = "eager"
-        model = Qwen3ForCausalLM(config).eval()
+        model = Qwen3_5ForCausalLM(config).eval()
         first = record()
         second = deepcopy(first)
         second["messages"][1]["content"] += " visible evidence visible evidence"

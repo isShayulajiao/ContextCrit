@@ -48,11 +48,12 @@ def _prepare(args, mode, tokenizer=None):
     stats = {"actions": 0, "total_pairs": 0, "valid_pairs": 0,
              "task_actions": Counter(), "action_counts": Counter(), "pair_status": Counter()}
     samples, offsets = set(), []
+    selection = {}
     maximum = 0
     with (root / "prepared.jsonl.tmp").open("wb") as prepared, \
             (root / "data_audit.jsonl.tmp").open("w", encoding="utf-8") as audit_file, \
             (root / "training_pairs.jsonl.tmp").open("w", encoding="utf-8") as pairs:
-        for record in iter_records(args.data):
+        for record in iter_records(args.data, max_samples=getattr(args, "max_samples", None), selection=selection):
             meta = record["metadata"]
             samples.add(meta["sample_id"])
             stats["actions"] += 1
@@ -80,7 +81,8 @@ def _prepare(args, mode, tokenizer=None):
         raise ValueError("没有有效训练动作")
     for filename in ("prepared.jsonl", "data_audit.jsonl", "training_pairs.jsonl"):
         (root / (filename + ".tmp")).replace(root / filename)
-    stats.update(samples=len(samples), max_tokens=maximum, dataset_sha256=sha256(args.data))
+    stats.update(samples=len(samples), max_tokens=maximum, dataset_sha256=sha256(args.data),
+                 selection=selection)
     write_json(root / "prepared_offsets.json", offsets)
     write_json(root / "data_summary.json", stats)
     print(json.dumps(stats, ensure_ascii=False, indent=2), flush=True)
@@ -134,14 +136,24 @@ def trainer_class():
     from ScopeCT.objective import scope_loss
 
     class ActionTrainer(Trainer):
-        def __init__(self, *args, ct_weight=0.0, margin=1.0, **kwargs):
+        def __init__(self, *args, ct_weight=0.0, margin=1.0, low_memory=False, **kwargs):
             super().__init__(*args, **kwargs)
             self.ct_weight, self.margin = ct_weight, margin
+            self.low_memory = low_memory
             self.model_accepts_loss_kwargs = False
             self.last_loss_components = {}
 
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             labels = inputs["labels"]
+            if getattr(self, "low_memory", False):
+                # Enter the wrapped model normally so DDP prepares its reducer
+                # and gradient accumulation/no_sync retain their semantics.
+                outputs = model(**inputs, scope_compute_loss=True, use_cache=False)
+                loss, metrics = outputs.loss, outputs.scope_metrics
+                if not torch.isfinite(loss):
+                    raise RuntimeError("训练损失非有限，停止而不导出成功权重")
+                self.last_loss_components = {k: float(v.item()) for k, v in metrics.items()}
+                return (loss, outputs) if return_outputs else loss
             # Qwen3's official logits_to_keep avoids allocating vocabulary logits
             # for the system/prompt. Keep the row preceding the first target.
             start = int((labels != -100).nonzero()[:, 1].min().item()) - 1
@@ -174,10 +186,13 @@ def run(args, mode):
         print(f"原始数据与轨迹检查完成（未下载模型、未训练）：{root}")
         return
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig, TrainingArguments, set_seed
+    from transformers import AutoTokenizer, GenerationConfig, TrainingArguments, set_seed
     from peft import LoraConfig, get_peft_model
     from safetensors import safe_open
-    from ScopeSFT.tokenization import Collator
+    from ScopeSFT.tokenization import Collator, configure_tokenizer
+    from ScopeSFT.model_support import load_text_model, lora_target_modules
+    from ScopeSFT.training_forward import install_training_forward, remove_training_forward
+    from ScopeSFT.numerics import install_fp32_native_fallback, remove_fp32_native_fallback
 
     if not args.dry_run:
         _hardware(args)
@@ -187,34 +202,45 @@ def run(args, mode):
     if rank == 0:
         root.mkdir(parents=True, exist_ok=True)
         tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True, trust_remote_code=False)
-        if not tokenizer.is_fast or tokenizer.chat_template is None:
-            raise ValueError("需要具有 chat_template 与 offset mapping 的 Qwen fast tokenizer")
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = "right"
+        configure_tokenizer(tokenizer)
         stats = _prepare(args, mode, tokenizer)
         tokenizer.save_pretrained(root / "tokenizer")
     if distributed:
         torch.distributed.barrier()
     if rank != 0:
         tokenizer = AutoTokenizer.from_pretrained(root / "tokenizer", use_fast=True, local_files_only=True)
+        configure_tokenizer(tokenizer)
         stats = json.loads((root / "data_summary.json").read_text())
     if args.dry_run:
         print(f"Token 与长度检查完成（未训练）：{root}")
         return
     if stats["actions"] < int(os.environ.get("WORLD_SIZE", "1")) * args.batch_size * args.grad_accum:
         warnings.warn("训练动作数小于一个有效 batch；这是工程短跑，不足以证明训练效果。")
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=torch.float32 if args.cpu else torch.float16,
-        use_safetensors=True, trust_remote_code=False, attn_implementation=args.attention,
-        low_cpu_mem_usage=True)
-    if model.config.model_type != "qwen3":
-        raise ValueError("此实现专门验证 Qwen3 架构；--model 必须为 Qwen3 checkpoint")
-    revision = getattr(model.config, "_commit_hash", None)
+    low_memory = getattr(args, "low_memory", "auto") != "off"
+    precision = getattr(args, "dtype", "auto")
+    if precision == "auto":
+        precision = "fp32" if args.cpu else "fp16"
+    if args.cpu and precision == "fp16":
+        raise ValueError("CPU 工程测试请使用 --dtype fp32；FP16 训练用于 CUDA")
+    attention = args.attention
+    if low_memory:
+        from ScopeSFT.attention import register_chunked_attention
+        attention = register_chunked_attention(getattr(args, "attention_chunk_size", 128))
+    model, model_info = load_text_model(
+        args.model, dtype=torch.float32 if precision == "fp32" else torch.float16,
+        attention=attention, max_length=args.max_length)
+    revision = model_info["base_revision"]
     model.config.use_cache = False
     model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.eos_token_id = tokenizer.eos_token_id
+    numeric_stability = install_fp32_native_fallback(model)
+    targets = lora_target_modules(model)
+    if low_memory:
+        install_training_forward(model, ct_weight=args.ct_weight if mode == "ct" else 0.0,
+                                 margin=args.margin, chunk_size=getattr(args, "loss_chunk_size", 128))
     model = get_peft_model(model, LoraConfig(
         r=args.lora_r, lora_alpha=2 * args.lora_r, lora_dropout=0.05, bias="none", task_type="CAUSAL_LM",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]))
+        target_modules=targets))
     model.enable_input_require_grads()
     if rank == 0:
         model.print_trainable_parameters()
@@ -227,14 +253,19 @@ def run(args, mode):
         learning_rate=args.learning_rate, lr_scheduler_type="cosine",
         warmup_ratio=0.0 if planned_updates < 10 else 0.03,
         max_grad_norm=1.0, weight_decay=0.01, optim="adamw_torch",
-        fp16=not args.cpu, bf16=False, use_cpu=args.cpu,
-        gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
+        fp16=precision == "fp16", bf16=False, use_cpu=args.cpu,
+        gradient_checkpointing=getattr(args, "gradient_checkpointing", "on") == "on",
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=1, save_strategy="steps", save_steps=200, save_total_limit=2,
         dataloader_num_workers=0, dataloader_pin_memory=not args.cpu,
         remove_unused_columns=False, ddp_find_unused_parameters=False, ddp_timeout=7200,
         report_to="none", seed=args.seed, data_seed=args.seed)
     manifest = {"status": "training", "mode": mode, **stats, "arguments": vars(args),
                 "base_model": args.model, "base_revision": revision,
+                "model_support": model_info, "lora_target_modules": targets,
+                "numeric_stability": numeric_stability,
+                "resolved_dtype": precision, "low_memory": low_memory,
+                "resolved_attention": attention,
                 "torch": torch.__version__, "world_size": int(os.environ.get("WORLD_SIZE", "1")),
                 "objective": "per-example response NLL" + (" + lambda*softplus(m+z_neg-z_pos)" if mode == "ct" else ""),
                 "independent_model_judging": False,
@@ -245,7 +276,8 @@ def run(args, mode):
         write_json(root / "training_manifest.json", manifest)
     trainer = trainer_class()(model=model, args=training_args, train_dataset=DiskDataset(root),
                               data_collator=Collator(tokenizer.pad_token_id), processing_class=tokenizer,
-                              ct_weight=args.ct_weight if mode == "ct" else 0.0, margin=args.margin)
+                              ct_weight=args.ct_weight if mode == "ct" else 0.0, margin=args.margin,
+                              low_memory=low_memory)
     result = trainer.train()
     if distributed:
         torch.distributed.barrier()
@@ -259,11 +291,17 @@ def run(args, mode):
         # Merge on CPU to avoid an export-time GPU allocation spike.
         base = base.to("cpu")
         merged = base.merge_and_unload(safe_merge=True)
+        remove_training_forward(merged)
+        remove_fp32_native_fallback(merged)
         merged.config.use_cache = True
+        # The custom backend is training-only; keep exports usable by ordinary
+        # AutoModelForCausalLM without importing or registering our backend.
+        merged.config._attn_implementation = "sdpa"
         # Official Qwen checkpoints carry sampling defaults (temperature/top_p).
         # Reset together: changing only do_sample=False can make HF reject saving.
         merged.generation_config = GenerationConfig.from_model_config(merged.config)
-        merged.save_pretrained(root / "final_model", safe_serialization=True, max_shard_size="2GB")
+        merged.save_pretrained(root / "final_model", safe_serialization=True, max_shard_size="2GB",
+                               save_original_format=False)
         tokenizer.save_pretrained(root / "final_model")
         files = sorted((root / "final_model").glob("*.safetensors"))
         if not files:
