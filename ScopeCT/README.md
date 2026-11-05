@@ -24,12 +24,11 @@ L_batch = mean_examples(L_i)
 
 ## 运行
 
-环境与 TITAN RTX / 470 驱动注意事项见 [ScopeSFT 安装说明](../ScopeSFT/README.md)。两套代码只安装一次：
+环境与 TITAN RTX / 470 驱动注意事项见 [ScopeSFT 的 Conda 安装说明](../ScopeSFT/README.md)。两套代码共用一个环境：
 
 ```bash
 cd /你的路径/CultCrit-Bench
-bash ScopeCT/install.sh
-source ~/.venvs/scope-qwen35/bin/activate
+conda activate scope-qwen35
 python ScopeCT/train.py
 # 只需按提示输入 /data/train_optimized_validated.json
 ```
@@ -55,7 +54,7 @@ python train.py \
 
 默认处理全部任务，等价于 `--max-samples None`；`--max-samples 20` 选取输入 JSON 前 20 条任务，再展开它们的全部动作。SFT 与 CT 对照应使用相同选择参数。`--max-length 65536` 只是上限，实际约 3.6 万 token 的序列不会填满到 65536，也不会为省显存删掉证据、答案或分歧位置。
 
-默认启用分块完整因果注意力、分块词表损失与梯度重计算。SFT 项仍是每条完整响应的 token 平均，CT 项仍在同一个有效首次分歧位置计算上述公式，批次仍按所有样本平均。若需进一步控制显存，可设置 `--loss-chunk-size 64 --attention-chunk-size 64`；完整选项和硬件限制见 [ScopeSFT README](../ScopeSFT/README.md)。四卡 DDP 每卡各持有一份模型，不能将四张 24 GB 显卡直接视为一张 96 GB 显卡。
+默认启用分块完整因果注意力、分块词表损失、原生线性注意力的可微状态分段与梯度重计算。SFT 项仍是每条完整响应的 token 平均，CT 项仍在同一个有效首次分歧位置计算上述公式，批次仍按所有样本平均。若需进一步控制显存，可设置 `--loss-chunk-size 64 --attention-chunk-size 64 --linear-chunk-size 256 --activation-offload cpu`；CPU 转存需要额外主机内存和传输时间。完整选项和硬件限制见 [ScopeSFT README](../ScopeSFT/README.md)。四卡 DDP 每卡各持有一份模型，不能将四张 24 GB 显卡直接视为一张 96 GB 显卡。
 
 不需要手动制作偏好 JSON，也不调用付费模型构造负例。默认输出为 `ScopeCT/outputs/<唯一运行目录>/final_model`，这是已经合并的完整权重。另保存 `adapter`、训练日志、规则依据、token 分歧与最终权重哈希。完整参数、长度限制和文件说明见 ScopeSFT README。
 

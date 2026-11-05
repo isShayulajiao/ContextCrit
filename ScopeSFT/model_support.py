@@ -100,6 +100,10 @@ def load_text_model(model_path, *, dtype=None, attention="sdpa", local_files_onl
         "vision_tower_loaded": False,
         "text_only_export": model.config.model_type == "qwen3_5_text",
         "max_position_embeddings": getattr(config, "max_position_embeddings", None),
+        "dimensions": {name: getattr(config, name, None) for name in (
+            "hidden_size", "intermediate_size", "num_hidden_layers", "vocab_size",
+            "num_attention_heads", "num_key_value_heads", "linear_num_key_heads",
+            "linear_num_value_heads", "linear_key_head_dim", "linear_value_head_dim")},
     }
     return model, info
 

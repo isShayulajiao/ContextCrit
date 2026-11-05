@@ -33,6 +33,8 @@ class LauncherTests(unittest.TestCase):
         self.assertIsNone(args.max_samples)
         self.assertEqual(args.loss_chunk_size, 128)
         self.assertEqual(args.attention_chunk_size, 128)
+        self.assertEqual(args.linear_chunk_size, 512)
+        self.assertEqual(args.activation_offload, "auto")
         self.assertEqual(args.low_memory, "auto")
         self.assertEqual(args.dtype, "auto")
         self.assertEqual(args.gradient_checkpointing, "on")
@@ -51,6 +53,7 @@ class LauncherTests(unittest.TestCase):
                  "--grad-accum", "7", "--learning-rate", "0.001", "--seed", "9", "--lora-r", "8",
                  "--ct-weight", "0.3", "--margin", "0.5", "--attention", "eager",
                  "--loss-chunk-size", "17", "--attention-chunk-size", "19", "--low-memory", "off",
+                 "--linear-chunk-size", "256", "--activation-offload", "cpu",
                  "--dtype", "fp32", "--gradient-checkpointing", "off", "--allow-sft-fallback"]
         for mode in ("sft", "ct"):
             with self.subTest(mode=mode):
@@ -82,6 +85,23 @@ class LauncherTests(unittest.TestCase):
                     code, call = self.invoke([name, value])
                     self.assertEqual(code, 2)
                     call.assert_not_called()
+
+    def test_invalid_linear_segments_fail_before_launch(self):
+        for value in ("0", "32", "63", "65", "-64"):
+            with self.subTest(value=value), redirect_stderr(StringIO()):
+                code, call = self.invoke(["--linear-chunk-size", value])
+                self.assertEqual(code, 2)
+                call.assert_not_called()
+
+    def test_old_environment_is_rejected_before_torchrun(self):
+        from ScopeSFT.preflight import TrainingEnvironmentError
+        with patch("ScopeSFT.preflight.check_training_environment",
+                   side_effect=TrainingEnvironmentError("transformers=4.51.3; requires 5.3.0")), \
+                redirect_stderr(StringIO()) as error:
+            code, call = self.invoke(["--gpus", "0123"])
+        self.assertEqual(code, 1)
+        call.assert_not_called()
+        self.assertIn("transformers=4.51.3", error.getvalue())
 
     def test_worker_receives_options_without_relaunch(self):
         runtime = ModuleType("ScopeSFT.runtime")

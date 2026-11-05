@@ -54,6 +54,10 @@ def parser(mode):
     p.add_argument("--attention", choices=["sdpa", "eager"], default="sdpa")
     p.add_argument("--loss-chunk-size", type=int, default=128, help="每次计算词表 loss 的响应 token 数")
     p.add_argument("--attention-chunk-size", type=int, default=128, help="低显存 attention 的 query 分块大小")
+    p.add_argument("--linear-chunk-size", type=int, default=512,
+                   help="Qwen3.5 原生线性注意力的序列分块，64 的正整数倍；跨块梯度和状态完整保留")
+    p.add_argument("--activation-offload", choices=["auto", "none", "cpu"], default="auto",
+                   help="auto 在 GPU 且实际最长序列 >=16384 时启用 CPU 激活转存；可显式 none 关闭")
     p.add_argument("--low-memory", choices=["auto", "on", "off"], default="auto", help="低显存训练路径，默认 auto")
     p.add_argument("--dtype", choices=["auto", "fp16", "fp32"], default="auto", help="默认 GPU fp16 / CPU fp32")
     p.add_argument("--gradient-checkpointing", choices=["on", "off"], default="on", help="默认启用梯度检查点")
@@ -84,6 +88,8 @@ def launch(mode):
     for key in ("batch_size", "grad_accum", "lora_r", "loss_chunk_size", "attention_chunk_size"):
         if getattr(args, key) < 1:
             p.error(f"{key} 必须 >=1")
+    if args.linear_chunk_size < 64 or args.linear_chunk_size % 64:
+        p.error("linear-chunk-size 必须为 64 的正整数倍")
     if args.max_length < 32 or args.max_steps == 0 or args.max_steps < -1:
         p.error("max-length 必须 >=32；max-steps 为 -1 或正整数")
     if not math.isfinite(args.ct_weight) or args.ct_weight < 0 or not math.isfinite(args.margin) or args.margin < 0:
@@ -98,6 +104,17 @@ def launch(mode):
         args.output = str(Path(__file__).resolve().parents[1] / folder / "outputs" / run)
     if not args.worker and Path(args.output).exists() and any(Path(args.output).iterdir()):
         p.error("输出目录非空；请使用新目录，防止覆盖权重或混合实验。")
+    if not args.validate_only:
+        from ScopeSFT.preflight import check_training_environment, TrainingEnvironmentError
+        try:
+            environment = check_training_environment()
+        except TrainingEnvironmentError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1) from exc
+        if not args.worker:
+            print(f"环境预检通过：{environment['python_executable']}；"
+                  f"transformers={environment['versions']['transformers']}；"
+                  f"torch={environment['versions']['torch']}", flush=True)
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     if not args.worker:
@@ -113,6 +130,8 @@ def launch(mode):
                         "loss_chunk_size", "attention_chunk_size", "low_memory", "dtype",
                         "gradient_checkpointing"):
                 command.extend(["--" + key.replace("_", "-"), str(getattr(args, key))])
+            command.extend(["--linear-chunk-size", str(args.linear_chunk_size),
+                            "--activation-offload", args.activation_offload])
             if args.max_samples is not None:
                 command.extend(["--max-samples", str(args.max_samples)])
             command.extend(["--gpus", ",".join(map(str, args.gpus))])
@@ -126,6 +145,8 @@ def launch(mode):
         print(f"训练未完成：{exc}", file=sys.stderr)
         if "out of memory" in str(exc).lower():
             print("显存不足：保持 --batch-size 1 和 --gradient-checkpointing on，尝试 "
-                  "--low-memory on --loss-chunk-size 64 --attention-chunk-size 64（必要时 32）。"
+                  "--low-memory on --loss-chunk-size 64 --attention-chunk-size 64 "
+                  "--linear-chunk-size 256 --activation-offload cpu。"
+                  "CPU offload 需要额外主机内存与传输时间。"
                   "程序没有自动裁短样本或丢弃监督；四卡 DDP 仍受每卡显存限制。", file=sys.stderr)
         raise SystemExit(1) from exc

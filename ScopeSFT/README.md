@@ -8,15 +8,27 @@ Qwen3.5 使用官方原生文本 CausalLM 组件训练，不加载视觉编码�
 
 ## 安装一次
 
-Linux、Python 3.10–3.12（推荐 3.11）、可访问 PyTorch/PyPI/Hugging Face 的网络。建议至少 16 GB 主机内存，并为模型缓存、训练缓存和两套最终权重预留 30 GB 以上磁盘；大型数据集的动作缓存可能需要更多空间。
+Linux、Python 3.10–3.12（推荐 3.11）、可访问 PyTorch/PyPI/Hugging Face 的网络。为模型缓存、训练缓存和两套最终权重预留 30 GB 以上磁盘；大型数据集的动作缓存可能需要更多空间。CPU 激活转存还需额外主机内存，四个训练进程的占用会累加。
+
+使用 Conda 创建环境并安装已验证的版本：
 
 ```bash
-cd /你的路径/CultCrit-Bench
-bash ScopeSFT/install.sh
-source ~/.venvs/scope-qwen35/bin/activate
+conda create -n scope-qwen35 python=3.11 pip -y
+conda activate scope-qwen35
+cd /你的路径/CultCrit-Bench/ScopeSFT
+python -m pip install 'torch==2.5.1+cu118' --index-url https://download.pytorch.org/whl/cu118
+python -m pip install -r requirements.txt
+python -m pip check
 ```
 
-脚本创建独立虚拟环境，安装 PyTorch **2.5.1 CUDA 11.8**、Transformers **5.3.0**、PEFT **0.18.1**、Accelerate **1.12.0**，并运行依赖检查。无需另装系统 CUDA Toolkit。若需要指定虚拟环境目录：`bash ScopeSFT/install.sh /绝对路径/venv`；指定 Python 可用 `SCOPE_PYTHON=/绝对路径/python3.11 bash ScopeSFT/install.sh`。首次运行会下载公开的官方模型；本地已有完整模型时使用 `--model /绝对路径/模型目录`。
+固定版本为 PyTorch **2.5.1 CUDA 11.8**、Transformers **5.3.0**、PEFT **0.18.1**、Accelerate **1.12.0**，无需另装系统 CUDA Toolkit。环境可以使用其他名称；若沿用已有 `scope-qwen3`，在该环境内执行相同依赖安装命令即可，不需重复创建。原 `install.sh` 仍供选择 venv 的用户使用；Conda 用户无需运行它。首次运行会下载公开的官方模型；本地已有完整模型时使用 `--model /绝对路径/模型目录`。
+
+启动器会在导入 Torch、初始化 GPU 或启动四个进程之前检查环境，打印当前 Python 路径。`ModuleNotFoundError: transformers.masking_utils` 表示依赖或安装有误，本身不是显存不足。`screen -r` 仅重连已有 shell，外部终端激活新 Conda 环境不会切换旧 screen 会话；应在 screen 窗口内激活并检查：
+
+```bash
+which python
+python -c "import sys, transformers; print(sys.executable); print(transformers.__version__)"
+```
 
 ### 四张 TITAN RTX / 驱动 470.182.03
 
@@ -25,6 +37,8 @@ source ~/.venvs/scope-qwen35/bin/activate
 默认 `--low-memory auto` 启用训练显存优化：完整因果注意力按 query 分块并重计算，响应 token 的词表投影与损失也分块并重计算，避免一次保存完整长序列的词表 logits 和注意力矩阵。保留全上下文、全部响应监督和原来的逐样本平均损失，不通过滑动窗口、裁短或删除 CT 分歧位置降低显存。完整注意力的总计算量仍随长度快速增长，低显存不代表长序列计算很快。
 
 Qwen3.5 使用原生 PyTorch 线性注意力回退时，对归一化与递推运算禁用 autocast，并用 FP32 计算后将输出转回模型 dtype，避免低幅值/补零输入在 FP16 反向时产生非有限梯度。该保护同时用于标准和低显存训练路径，保持原有公式，不增加训练参数；实际启用情况写入 `training_manifest.json` 的 `numeric_stability`。
+
+原生线性注意力还会按 `--linear-chunk-size` 分段并重计算，默认 512 token，只把当前段转换为 FP32。段间完整传递可微递推状态，既不清零也不截断梯度，因此后段损失仍能更新前段对应的参数。分段大小必须为原生 64-token 块的整数倍，保留原计算分组。对第三方优化内核不作替换。
 
 `nvidia-smi` 的 CUDA 11.4 是驱动报告的兼容版本，不是 Python 内的 CUDA runtime。470 驱动在 CUDA 11.x 次版本兼容范围内，但仍可能遇到 PTX、新驱动特性或 NCCL 限制。程序在下载权重前执行真实 CUDA FP16 矩阵反向和多卡 NCCL all-reduce；失败时保留具体错误并停止。若确为 driver/PTX 不兼容，需要升级驱动。当前开发环境无这些 GPU，未声称已在该硬件实测成功。
 
@@ -74,11 +88,17 @@ python ScopeSFT/train.py --data /data/train.json --gpus 0123 \
 | `--low-memory` | `auto` | `auto/on` 使用低显存路径；`off` 供标准路径对照 |
 | `--loss-chunk-size` | `128` | 每个词表投影与损失块的响应 token 数 |
 | `--attention-chunk-size` | `128` | 完整因果注意力的 query 块大小 |
+| `--linear-chunk-size` | `512` | 原生线性注意力的序列分段，必须为 64 的正整数倍 |
+| `--activation-offload` | `auto` | GPU 且数据实际最长序列 ≥16384 时自动使用 CPU 转存；`cpu` 强制启用，`none` 关闭 |
 | `--gradient-checkpointing` | `on` | 层级梯度重计算，关闭通常增加显存 |
 | `--dtype` | `auto` | GPU 使用 FP16、CPU 使用 FP32；也可显式指定 |
 | `--batch-size` | `1` | 每卡 microbatch，不等于梯度累积后的有效 batch |
 
-如果仍然 OOM，先保持每卡 batch 1，并将 `--loss-chunk-size 64 --attention-chunk-size 64`，必要时继续降为 32。分块变小增加重计算与调度开销，但不改变训练目标。不要为绕过 OOM 静默裁剪证据或标签；降低 `--grad-accum` 通常也不会显著降低单步激活显存。若全上下文的模型状态或其他激活仍超过单卡容量，程序无法保证通过这些分块参数解决，需依据实际峰值另选显存方案。
+原来的四参数命令即可启动全部优化：默认分块、层级重计算和原生线性分段始终启用；当 GPU 数据实际最长序列 ≥16384 时，默认 `auto` 还会自动使用 CPU 激活转存。选择依据是数据实际 token 长度，而不是 `--max-length` 上限；启动时打印解析后的策略，并保存到 manifest。短序列默认不转存，显式 `--activation-offload none` 可关闭自动策略。
+
+如果仍然 OOM，先保持每卡 batch 1，并加 `--loss-chunk-size 64 --attention-chunk-size 64 --linear-chunk-size 256`。分块与 CPU 转存增加重计算或传输开销，保留完整响应监督和跨段梯度。CPU 转存只处理 autograd 保存的激活，不移动模型参数，也不能消除反向重计算过程中的临时工作区；它需要额外主机内存，不是四卡显存合并。不要为绕过 OOM 静默裁剪证据或标签；降低 `--grad-accum` 通常也不会显著降低单步激活显存。
+
+成功后保存每个进程的 `memory_report.rankN.json`；CUDA OOM 时尽力保存 `oom_report.rankN.json`。报告包含发生阶段、实际 batch 长度、allocated/reserved/free/peak 显存和原始错误，不保存正文或答案。`training_manifest.json` 还记录实际模型维度、线性分段配置和最后一次 forward 的激活转存计数；转存字节计数是累计保存量，不是峰值显存。若仍然失败，应依据实际报告继续定位，不能仅凭 2B 参数量判断 36K 一定可训练。
 
 ## 数据与检查
 
@@ -116,6 +136,8 @@ python ScopeSFT/train.py --data /data/train.json --dry-run
   data_audit.jsonl          # 每条轨迹与分歧检查状态
   training_pairs.jsonl      # 正负例、依据及审核来源；SFT 不使用附加 CT 损失
   prepared.jsonl           # 训练 token 磁盘缓存
+  memory_report.rankN.json # 每进程训练完成时的显存快照
+  oom_report.rankN.json    # CUDA OOM 时尽力保存，失败的进程仍会正常报错退出
 ```
 
 只有 `training_manifest.json` 的 `status=completed` 才表示训练及导出均成功。`final_model` 可直接通过 `AutoModelForCausalLM.from_pretrained(绝对路径, torch_dtype=torch.float16)` 加载，无需再手动合并。推理继续使用 tokenizer 的 `apply_chat_template(..., add_generation_prompt=True, enable_thinking=False)`。训练输出、用户数据、缓存和权重不提交 GitHub。
@@ -129,6 +151,6 @@ python -m ScopeSFT.smoke_test
 
 测试覆盖精确 token 分歧、response mask、因果位置、损失/梯度、动态长度和原始任务条数选择，并增加微型 Qwen3.5 混合注意力的 CPU 校验。低显存实现检查分块前后损失和梯度的一致性，不能用这些数值测试代替真实长序列 GPU 峰值测量。烟雾测试用于检查训练、LoRA 权重更新、合并和重载；最终执行结果以本次交付的验证记录为准。这些检查不等于 Qwen3.5-2B 在四张 TITAN RTX 上的 3.6 万 token 训练验证，也不证明下游文学能力改善。
 
-本次已通过 91 项测试、5 组完整烟雾测试及两进程 Trainer 训练，详细环境与边界见 [Qwen3.5 验证记录](VALIDATION_QWEN35.md)。
+本轮已通过 119 项测试、5 组完整烟雾测试及两进程 Trainer 训练；另有 1 项 CUDA 实际转存测试因无 GPU 跳过，详细环境与边界见 [Qwen3.5 验证记录](VALIDATION_QWEN35.md)。
 
 用户压缩训练集只抽取前四条 T1–T4 样本检查，得到 58 条合法 ACTION 轨迹，没有逐条读取完整训练集；全量文件的最终检查发生在用户实际运行时。
