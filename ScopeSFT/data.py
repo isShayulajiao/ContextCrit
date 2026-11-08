@@ -1,4 +1,4 @@
-"""CultCrit supervision -> legal ScopeCrit ACTION trajectories, without remote calls.
+"""ContextCrit supervision -> legal ScopeCrit ACTION trajectories, without remote calls.
 
 Gold annotations are teacher labels, not observations. These are deterministic
 silver trajectories, NOT model rollouts or proof of annotation correctness.

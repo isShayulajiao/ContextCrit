@@ -1,8 +1,8 @@
 # 复制为 settings.local.yaml，在复制的文件中直接填入真实 Key。
 # settings.local.yaml 已被 Git 忽略；不要在本模板填写真实 Key 后提交。
 inputs:
-  - 'F:/2027申博/博士面试/CultCrit-Bench-main/CultCrit-Bench-main/dataset/test.json'
-  # - 'F:/其他目录/另一份完整数据集.json'
+  - '/path/to/test_optimized_validated.json'  # 替换为你的测试集绝对路径
+  # - '/path/to/another_test_dataset.json'
 agent_config: configs/deepseek.yaml  # 更换答题模型只修改此配置；本地服务示例 configs/local_openai.yaml
 actor_workers: 4   # 同时处理 4 条样本；本地 GPU 模型建议先改为 1
 max_samples: null  # YAML 中 null 表示全部；521 表示前 521 条；命令行 --max-samples None 表示全部
